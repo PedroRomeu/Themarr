@@ -10,6 +10,8 @@ import json
 import queue
 import requests
 import logging
+import re
+import tempfile
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # Manda o Flask silenciar as mensagens de "GET /api/logs"
@@ -151,6 +153,259 @@ def obter_logs():
         pass
     return jsonify({"logs": "".join(logs)})
 
+def processar_capas_pasta_atual(caminho_pasta_anime, nome_pasta_anime, config):
+    print(f"\n[AUTOMAÇÃO] 🎬 Iniciando processamento de metadados para: {nome_pasta_anime}")
+    
+    nomes_capas_locais = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
+    caminho_imagem_final = None
+    imagem_temporaria = False 
+    
+    # Valores padrão caso o Jellyfin esteja desligado
+    genero_final = "" 
+    nome_album_final = nome_pasta_anime 
+
+    # PRIORIDADE 2 - Imagem local
+    for nome_arquivo in nomes_capas_locais:
+        caminho_teste = os.path.join(caminho_pasta_anime, nome_arquivo)
+        if os.path.exists(caminho_teste):
+            print(f"[AUTOMAÇÃO] 🔍 Prioridade 2 Ativada: Imagem local encontrada ({nome_arquivo})")
+            caminho_imagem_final = caminho_teste
+            break
+
+    # BUSCA DE DADOS NO JELLYFIN (Para Gênero, Nome Limpo e Capa se faltar)
+    url_jelly = config.get("jelly_url")
+    api_jelly = config.get("jelly_api")
+    
+    if url_jelly and api_jelly:
+        print("[AUTOMAÇÃO] 🌐 Consultando Jellyfin para metadados adicionais...")
+        resultado_busca = buscar_dados_jellyfin(nome_pasta_anime, url_jelly, api_jelly)
+        
+        if resultado_busca["sucesso"]:
+            # MÁGICA 1: Pega o gênero real que o Jellyfin retornou!
+            genero_final = resultado_busca["generos"]
+            
+            # MÁGICA 2: Usa o nome OFICIAL do anime sem o ano para o álbum (ex: "86: Eighty-Six")
+            nome_album_final = resultado_busca["nome_oficial"]
+            
+            if genero_final:
+                print(f"[AUTOMAÇÃO] 🏷️ Gêneros encontrados: {genero_final}")
+            
+            # PRIORIDADE 1 - Baixa a capa só se não achou localmente
+            if not caminho_imagem_final and resultado_busca["url_imagem"]:
+                pasta_temp = tempfile.gettempdir()
+                nome_arquivo_temp = f"temp_cover_{resultado_busca['serie_id']}.jpg"
+                
+                caminho_imagem_final = baixar_imagem_jellyfin(
+                    url_imagem=resultado_busca["url_imagem"],
+                    api_key=api_jelly,
+                    pasta_destino=pasta_temp,
+                    nome_arquivo=nome_arquivo_temp
+                )
+                imagem_temporaria = True
+    else:
+        print("[AUTOMAÇÃO] ⚠️ Jellyfin não configurado/desmarcado. Pulando busca online.")
+
+    # APLICAR METADADOS NOS MP3
+    print("[AUTOMAÇÃO] 🚀 Varrendo a pasta para aplicar metadados nos arquivos MP3...")
+    mp3_encontrados = 0
+    
+    for raiz, subpastas, arquivos in os.walk(caminho_pasta_anime):
+        for arquivo in arquivos:
+            if arquivo.lower().endswith('.mp3'):
+                caminho_completo_mp3 = os.path.join(raiz, arquivo)
+                titulo_musica = os.path.splitext(arquivo)[0]
+                
+                # Injeta os dados limpos!
+                if injetar_metadados_mp3(caminho_completo_mp3, caminho_imagem_final, titulo_musica, nome_album_final, genero_final):
+                    mp3_encontrados += 1
+                    
+    print(f"[AUTOMAÇÃO] ✨ Concluído! Metadados aplicados em {mp3_encontrados} arquivo(s) MP3.")
+    
+    # FAXINA TEMPORÁRIA
+    if imagem_temporaria and caminho_imagem_final:
+        try:
+            os.remove(caminho_imagem_final)
+            print("[AUTOMAÇÃO] 🧹 Arquivo de imagem temporário apagado com sucesso. Pasta limpa!")
+        except Exception as e:
+            print(f"[AUTOMAÇÃO] ⚠️ Não foi possível apagar a imagem temporária: {e}")
+
+def limpar_nome_pesquisa(nome_pasta, remover_ano=False):
+    # Troca caracteres problemáticos (como o dois pontos japonês e traços) por espaços
+    nome_limpo = nome_pasta.replace('：', ' ').replace('-', ' ')
+    
+    if remover_ano:
+        # Modo Sobrevivência: Arranca tudo dentro de (), [] e {}
+        nome_limpo = re.sub(r'\(.*?\)|\[.*?\]|\{.*?\}', '', nome_limpo)
+    else:
+        # Modo Preciso: Arranca apenas [] e {}, MANTENDO o (Ano)
+        nome_limpo = re.sub(r'\[.*?\]|\{.*?\}', '', nome_limpo)
+    
+    # Remove espaços duplos
+    nome_limpo = re.sub(r'\s+', ' ', nome_limpo)
+    return nome_limpo.strip()
+
+def buscar_dados_jellyfin(nome_pasta, url_jellyfin, api_key):
+    clean_url = url_jellyfin.rstrip('/')
+    headers = {"X-Emby-Token": api_key} 
+
+    def tentar_buscar(termo):
+        params = {
+            "searchTerm": termo,
+            "IncludeItemTypes": "Series",
+            "Recursive": "true",
+            "Fields": "Genres"
+        }
+        try:
+            res = requests.get(f"{clean_url}/Items", headers=headers, params=params, timeout=10)
+            if res.status_code == 200:
+                dados = res.json()
+                if dados.get("Items") and len(dados["Items"]) > 0:
+                    serie = dados["Items"][0]
+                    
+                    # ==================================================
+                    # A MUDANÇA FOI FEITA AQUI:
+                    # Capturamos a lista de gêneros e juntamos com vírgula
+                    # ==================================================
+                    generos_lista = serie.get("Genres", [])
+                    generos_string = ", ".join(generos_lista) if generos_lista else ""
+
+                    return {
+                        "sucesso": True, 
+                        "nome_oficial": serie.get("Name"), 
+                        "serie_id": serie.get("Id"),
+                        "url_imagem": f"{clean_url}/Items/{serie.get('Id')}/Images/Primary",
+                        "generos": generos_string  # <-- E enviamos ele aqui pro resto do programa!
+                    }
+        except Exception as e:
+            pass
+        return {"sucesso": False}
+
+    # ==========================================
+    # ETAPA 1: Busca Precisa (Mantendo o Ano)
+    # ==========================================
+    termo_preciso = limpar_nome_pesquisa(nome_pasta, remover_ano=False)
+    print(f"\n[JELLYFIN] Pesquisando (Modo Preciso): '{termo_preciso}'...")
+    resultado = tentar_buscar(termo_preciso)
+    if resultado["sucesso"]:
+        print(f"[JELLYFIN] ✅ Encontrado: {resultado['nome_oficial']}")
+        return resultado
+
+    # ==========================================
+    # ETAPA 2: Busca Genérica (Removendo o Ano)
+    # ==========================================
+    termo_generico = limpar_nome_pesquisa(nome_pasta, remover_ano=True)
+    if termo_generico != termo_preciso:
+        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Genérica: '{termo_generico}'...")
+        resultado = tentar_buscar(termo_generico)
+        if resultado["sucesso"]:
+            print(f"[JELLYFIN] ✅ Encontrado via Fallback: {resultado['nome_oficial']}")
+            return resultado
+
+    # ==========================================
+    # ETAPA 3: Busca Ampla (Primeiras 2 Palavras)
+    # ==========================================
+    palavras = termo_generico.split()
+    if len(palavras) > 1:
+        termo_amplo = " ".join(palavras[:2])
+        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Ampla: '{termo_amplo}'...")
+        resultado = tentar_buscar(termo_amplo)
+        if resultado["sucesso"]:
+            print(f"[JELLYFIN] ✅ Encontrado via Busca Ampla: {resultado['nome_oficial']}")
+            return resultado
+
+    # ==========================================
+    # ETAPA 4: Busca Ultra Ampla (Apenas 1ª Palavra)
+    # ==========================================
+    if len(palavras) > 0:
+        termo_ultra_amplo = palavras[0]
+        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Ultra Ampla: '{termo_ultra_amplo}'...")
+        resultado = tentar_buscar(termo_ultra_amplo)
+        if resultado["sucesso"]:
+            print(f"[JELLYFIN] ✅ Encontrado via Busca Ultra Ampla: {resultado['nome_oficial']}")
+            return resultado
+
+    print(f"[JELLYFIN] ❌ Nenhuma série encontrada para a pasta '{nome_pasta}'.")
+    return {"sucesso": False}
+
+def baixar_imagem_jellyfin(url_imagem, api_key, pasta_destino, nome_arquivo="cover.jpg"):
+    """
+    Faz o download da imagem de capa do Jellyfin e salva na pasta de destino.
+    """
+    headers = {"X-Emby-Token": api_key}
+    caminho_completo = os.path.join(pasta_destino, nome_arquivo)
+    
+    try:
+        print(f"[JELLYFIN] 📥 Iniciando download da imagem de capa...")
+        # stream=True faz o download em partes, consumindo menos memória
+        res = requests.get(url_imagem, headers=headers, stream=True, timeout=15)
+        
+        if res.status_code == 200:
+            # Garante que a pasta existe antes de salvar
+            os.makedirs(pasta_destino, exist_ok=True)
+            
+            # Salva o arquivo em modo binário ('wb')
+            with open(caminho_completo, 'wb') as f:
+                for chunk in res.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            print(f"[JELLYFIN] 💾 Imagem salva com sucesso em: {caminho_completo}")
+            return caminho_completo
+        else:
+            print(f"[JELLYFIN] ❌ Falha ao baixar imagem. Servidor retornou Status: {res.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"[JELLYFIN] ❌ Erro durante o download da imagem: {e}")
+        return None
+    
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC, error, TIT2, TPE1, TALB, TPE2, TCON
+
+def injetar_metadados_mp3(caminho_mp3, caminho_imagem, titulo, album, genero):
+    """
+    Injeta a imagem de capa e metadados essenciais e limpos no arquivo .mp3.
+    """
+    try:
+        audio = MP3(caminho_mp3, ID3=ID3)
+        try:
+            audio.add_tags()
+        except error:
+            pass 
+            
+        # 1. INJETANDO OS TEXTOS LIMPOS
+        audio.tags.add(TIT2(encoding=3, text=titulo))  # Título (Nome do arquivo)
+        
+        # Álbum (Nome limpo do anime). Se você preferir 100% vazio, basta comentar a linha abaixo:
+        audio.tags.add(TALB(encoding=3, text=album))   
+        
+        # Gênero dinâmico do Jellyfin
+        if genero:
+            audio.tags.add(TCON(encoding=3, text=genero))          
+        
+        # 2. INJETANDO A IMAGEM
+        if caminho_imagem and os.path.exists(caminho_imagem):
+            with open(caminho_imagem, 'rb') as f:
+                dados_imagem = f.read()
+                
+            mime_type = 'image/png' if caminho_imagem.lower().endswith('.png') else 'image/jpeg'
+            
+            audio.tags.add(
+                APIC(
+                    encoding=3,       
+                    mime=mime_type,   
+                    type=3,           
+                    desc=u'Cover',    
+                    data=dados_imagem 
+                )
+            )
+        
+        audio.save(v2_version=3)
+        return True
+        
+    except Exception as e:
+        print(f"[MP3] ❌ Erro ao injetar metadados: {e}")
+        return False
+
 # =======================================================
 # PONTE DE COMUNICAÇÃO JS -> PYTHON (A CLASSE API)
 # =======================================================
@@ -235,6 +490,29 @@ class Api:
             for temp in temporadas_para_limpar:
                 mover_episodios_soltos(pasta_anime_raiz, temp)
 
+        # =========================================================
+        # NOVO: CHAMADA DO NOSSO MÓDULO DE CAPAS AQUI!
+        # =========================================================
+        janela.evaluate_js(f"window.atualizarProgressoGlobal(99, 'Applying Cover Arts...', '99%')")
+        
+        config_atual = carregar_config()
+        # Pega automaticamente o nome da pasta (ex: "86: Eighty-Six (2021)")
+        nome_do_anime = os.path.basename(pasta_anime_raiz)
+        
+        # Respeita a caixinha "Fetch Metadata from Jellyfin" do HTML
+        if not config_atual.get("jelly_check"):
+            # Se a caixinha estiver desmarcada, limpamos temporariamente os dados do Jellyfin
+            # Assim, a nossa função tenta APENAS procurar imagem local na pasta e pula a internet.
+            config_atual["jelly_url"] = ""
+            config_atual["jelly_api"] = ""
+
+        # Chama a função que criamos hoje!
+        processar_capas_pasta_atual(
+            caminho_pasta_anime=pasta_anime_raiz,
+            nome_pasta_anime=nome_do_anime,
+            config=config_atual
+        )
+
         texto_final = f"{total}/{total} (100%)"
         janela.evaluate_js(f"window.atualizarProgressoGlobal(100, 'All operations completed!', '{texto_final}')")
         janela.evaluate_js("window.finalizarProcessamentoUI()")
@@ -275,6 +553,10 @@ if __name__ == '__main__':
     t = threading.Thread(target=iniciar_servidor)
     t.daemon = True
     t.start()
+
+    # === TESTE SUPREMO: JELLYFIN + MP3 (TEMPORÁRIO) ===
+    
+    # ==================================================
 
     api = Api()
 

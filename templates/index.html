@@ -32,7 +32,7 @@
         </header>
 
         <section class="mb-5">
-            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Anime Directory</h2>
+            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Media Directory</h2>
             <div class="flex items-center gap-3 bg-neutral-800 border border-neutral-700 rounded-md p-1.5 shadow-sm">
                 <button onclick="escolherPasta()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
                     📂 Browse
@@ -249,7 +249,7 @@ System ready. Awaiting tasks...
             }
             if(!nome) { alert("Please enter a track name!"); return; }
             if(!destino || destino === "") { alert("Please select a target folder!"); return; }
-            if(pathTxt === "No folder selected...") { alert("Please browse for an anime folder first!"); return; }
+            if(pathTxt === "No folder selected...") { alert("Please browse for an media folder first!"); return; }
 
             filaMusicas.push({ link, nome, destino, lufs, status: 'pendente' });
             
