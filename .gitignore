@@ -1,0 +1,12 @@
+# Ambientes virtuais e cache do Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Configurações locais (Segurança!)
+config.json
+
+# Binários pesados (Fffmpeg)
+bin/
+*.exe
