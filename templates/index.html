@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Themarr</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        /* Remove setas do input number */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* Efeito sutil ao arrastar o item da fila */
+        .dragging { opacity: 0.5; border: 1px dashed #3b82f6; }
+    </style>
+</head>
+<body class="bg-[#1e1e1e] text-gray-200 min-h-screen p-5 select-none flex flex-col">
+
+    <div class="max-w-3xl mx-auto w-full flex-grow flex flex-col">
+        <header class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-semibold text-white tracking-wide">
+                Themarr <span class="text-blue-500 font-bold">Manager</span>
+            </h1>
+            <button onclick="toggleModal('settingsModal')" class="text-neutral-400 hover:text-white transition-colors flex items-center gap-2 text-sm font-medium bg-neutral-800 hover:bg-neutral-700 px-3 py-1.5 rounded border border-neutral-700">
+                ⚙️ Settings
+            </button>
+        </header>
+
+        <section class="mb-5">
+            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Anime Directory</h2>
+            <div class="flex items-center gap-3 bg-neutral-800 border border-neutral-700 rounded-md p-1.5 shadow-sm">
+                <button onclick="escolherPasta()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
+                    📂 Browse
+                </button>
+                <span id="pastaPath" class="text-neutral-400 text-sm truncate w-full px-2">No folder selected...</span>
+            </div>
+        </section>
+
+        <section class="mb-5">
+            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">2. Track Details</h2>
+            <div class="bg-neutral-800 border border-neutral-700 rounded-md p-4 shadow-sm space-y-3">
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="linkInput" placeholder="YouTube URL" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
+                    <input type="text" id="nomeInput" placeholder="Track Name (e.g., Opening 1)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
+                </div>
+                
+                <div class="flex gap-3">
+                    <select id="destinoSelect" class="flex-grow bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors text-neutral-300">
+                        <option value="" class="bg-neutral-800 text-white">Select a folder first...</option>
+                    </select>
+
+                    <div class="flex items-center bg-neutral-900 border border-neutral-700 rounded-md overflow-hidden flex-shrink-0 h-[38px]">
+                        <span class="text-xs text-neutral-500 font-bold px-2">LUFS:</span>
+                        
+                        <button onclick="alterarVolume(-1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">-</button>
+                        
+                        <input type="text" id="lufsInput" value="-24" oninput="validarDigitacaoLUFS(this)" 
+                               class="w-10 h-full bg-transparent text-center text-sm focus:outline-none font-bold text-white border-x border-neutral-700/70">
+                        
+                        <button onclick="alterarVolume(1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">+</button>
+                    </div>
+
+                    <button onclick="adicionarNaFila()" class="bg-neutral-700 hover:bg-neutral-600 text-white px-6 py-2 rounded-md text-sm font-bold transition-colors flex-shrink-0 border border-neutral-600 h-[38px]">
+                        ➕ Add
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-5 flex-grow flex flex-col">
+            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">3. Processing Queue</h2>
+            <div id="filaContainer" class="bg-neutral-900/80 border border-neutral-700 rounded-md p-2 h-40 overflow-y-auto space-y-2 flex-grow">
+                <div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>
+            </div>
+        </section>
+
+        <div class="mt-auto">
+            <button id="btnStart" onclick="iniciarProcessamento()" class="w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors">
+                ▶ START PROCESSING
+            </button>
+
+            <div class="flex justify-between text-xs font-bold text-neutral-400 mb-1 px-1">
+                <span id="statusText">Ready</span>
+                <span id="percentText">0%</span>
+            </div>
+            <div class="w-full bg-neutral-800 rounded-full h-2 border border-neutral-700 overflow-hidden">
+                <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+
+            <button id="btnToggleLog" onclick="toggleLog()" class="w-full text-center text-xs text-neutral-500 hover:text-neutral-400 mt-2 transition-colors py-1">
+                ▼ Show Detailed Logs
+            </button>
+            
+            <div id="logContainer" class="hidden mt-2 bg-neutral-950 border border-neutral-800 rounded p-2 h-32 font-mono text-[11px] text-neutral-400 overflow-y-auto text-left whitespace-pre-wrap select-text">
+System ready. Awaiting tasks...
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity">
+        <div class="bg-neutral-800 rounded-lg shadow-2xl border border-neutral-700 p-5 w-full max-w-sm">
+            <div class="flex justify-between items-center mb-5">
+                <h2 class="text-lg font-bold">⚙️ Settings</h2>
+                <button onclick="toggleModal('settingsModal')" class="text-neutral-400 hover:text-white">&times;</button>
+            </div>
+            <div class="space-y-3 text-sm">
+                <label class="flex items-center gap-2 cursor-pointer mb-2">
+                    <input type="checkbox" id="jellyfinCheck" onchange="salvarConfigsAuto()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                    <span class="font-medium">Fetch Metadata from Jellyfin</span>
+                </label>
+                <input type="text" id="jellyUrl" onchange="salvarConfigsAuto()" placeholder="Jellyfin URL (e.g., http://192.168.1.100:8096)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+                <input type="password" id="jellyApi" onchange="salvarConfigsAuto()" placeholder="API Key" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+                <p id="apiStatus" class="text-xs h-4"></p>
+
+                <button onclick="testarConexao()" id="btnTest" class="w-full bg-neutral-700 hover:bg-neutral-600 text-white py-2 rounded-md transition-colors font-medium">
+                    🔄 Test Connection
+                </button>
+
+                <p id="testMsg" class="text-sm font-bold text-center mt-2 hidden transition-opacity"></p>
+
+            </div>
+        </div>
+    </div>
+
+<script>
+        let filaMusicas = []; 
+        let opcoesDestinoGlobais = [];
+        let dragStartIndex = null; 
+        let isProcessing = false; 
+        let isCompleted = false; // <-- NOVA FLAG DE RESET
+
+        function toggleModal(modalID) { document.getElementById(modalID).classList.toggle("hidden"); }
+
+        function alterarVolume(delta) {
+         let input = document.getElementById('lufsInput');
+         let valorAtual = parseInt(input.value) || 0;
+         let novoValor = valorAtual + delta;
+         if(novoValor > 0) novoValor = 0; 
+         if(novoValor < -70) novoValor = -70; 
+         input.value = novoValor;
+         salvarConfigsAuto(); // <-- ADICIONE AQUI
+     }
+
+        function validarDigitacaoLUFS(input) {
+         if (input.value === "" || input.value === "-") return;
+         let valor = parseInt(input.value);
+         if (isNaN(valor) || valor > 0) input.value = "0";
+         salvarConfigsAuto(); // <-- ADICIONE AQUI
+     }
+
+        function toggleLog() {
+            const container = document.getElementById('logContainer');
+            const btn = document.getElementById('btnToggleLog');
+            container.classList.toggle('hidden');
+            if(container.classList.contains('hidden')) {
+                btn.innerText = '▼ Show Detailed Logs';
+            } else {
+                btn.innerText = '▲ Hide Detailed Logs';
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function adicionarTextoLog(texto) {
+            const container = document.getElementById('logContainer');
+            container.innerText += texto;
+            container.scrollTop = container.scrollHeight;
+        }
+
+        setInterval(async () => {
+            try {
+                let res = await fetch('http://127.0.0.1:5000/api/logs');
+                let data = await res.json();
+                if(data.logs) adicionarTextoLog(data.logs);
+            } catch(e) {}
+        }, 500);
+
+        function escolherPasta() {
+            if(isProcessing) return; 
+            
+            // --- SISTEMA DE RESET ---
+            if(isCompleted) {
+                filaMusicas = [];
+                isCompleted = false;
+                document.getElementById('progressBar').style.width = "0%";
+                document.getElementById('percentText').innerText = "0%";
+                document.getElementById('statusText').innerText = "Ready";
+                const btnStart = document.getElementById('btnStart');
+                btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
+                btnStart.innerText = "▶ START PROCESSING";
+                btnStart.disabled = true;
+                document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
+                atualizarFilaUI();
+            }
+
+            if(window.pywebview) {
+                pywebview.api.selecionar_pasta().then(resposta => {
+                    if(resposta.sucesso) {
+                        document.getElementById('pastaPath').innerText = resposta.caminho;
+                        opcoesDestinoGlobais = ['Main Theme'];
+                        if(resposta.temporadas.length === 0) {
+                            let nomePasta = resposta.caminho.split('\\').pop().split('/').pop();
+                            opcoesDestinoGlobais.push(`Season 01. ${nomePasta}`);
+                        } else {
+                            opcoesDestinoGlobais.push(...resposta.temporadas);
+                        }
+                        atualizarDropdownPrincipal();
+                    }
+                });
+            } else { alert("Conecte ao Python primeiro."); }
+        }
+
+        function atualizarDropdownPrincipal() {
+            const select = document.getElementById('destinoSelect');
+            select.innerHTML = '';
+            opcoesDestinoGlobais.forEach(op => {
+                select.innerHTML += `<option value="${op}" class="bg-neutral-800 text-white">${op}</option>`;
+            });
+        }
+
+        function adicionarNaFila() {
+            if(isProcessing) return; 
+            
+            // Se o usuário tentar adicionar música após o ✅ COMPLETED, resetamos apenas a UI inferior
+            if(isCompleted) {
+                isCompleted = false;
+                filaMusicas = [];
+                document.getElementById('progressBar').style.width = "0%";
+                document.getElementById('percentText').innerText = "0%";
+                document.getElementById('statusText').innerText = "Ready";
+                document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
+                atualizarFilaUI();
+            }
+
+            const link = document.getElementById('linkInput').value.trim();
+            const nome = document.getElementById('nomeInput').value.trim();
+            const destino = document.getElementById('destinoSelect').value;
+            const lufs = document.getElementById('lufsInput').value;
+            const pathTxt = document.getElementById('pastaPath').innerText;
+
+            if(!link || (!link.startsWith("https://") && !link.startsWith("http://"))) {
+                alert("Invalid URL format! The address must start with 'http://' or 'https://'.");
+                return;
+            }
+            if(!nome) { alert("Please enter a track name!"); return; }
+            if(!destino || destino === "") { alert("Please select a target folder!"); return; }
+            if(pathTxt === "No folder selected...") { alert("Please browse for an anime folder first!"); return; }
+
+            filaMusicas.push({ link, nome, destino, lufs, status: 'pendente' });
+            
+            document.getElementById('linkInput').value = "";
+            document.getElementById('nomeInput').value = "";
+            atualizarFilaUI();
+        }
+
+        function removerDaFila(index) {
+            if(isProcessing) return;
+            filaMusicas.splice(index, 1);
+            atualizarFilaUI();
+        }
+
+        function editarNomeFila(index, novoNome) { filaMusicas[index].nome = novoNome; }
+        function editarDestinoFila(index, novoDestino) { filaMusicas[index].destino = novoDestino; }
+
+        function dragStart(index, event) {
+            if(isProcessing) return;
+            dragStartIndex = index;
+            setTimeout(() => event.target.classList.add('dragging'), 0);
+        }
+        function dragEnd(event) { event.target.classList.remove('dragging'); }
+        function dragOver(event) { if(!isProcessing) event.preventDefault(); }
+        function drop(index) {
+            if (isProcessing || dragStartIndex === null || dragStartIndex === index) return;
+            const itemArrastado = filaMusicas.splice(dragStartIndex, 1)[0];
+            filaMusicas.splice(index, 0, itemArrastado);
+            dragStartIndex = null;
+            atualizarFilaUI();
+        }
+
+        function atualizarFilaUI() {
+            const container = document.getElementById('filaContainer');
+            const btnStart = document.getElementById('btnStart');
+
+            if(filaMusicas.length === 0) {
+                container.innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
+                if(!isCompleted) {
+                    btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
+                    btnStart.disabled = true;
+                    btnStart.innerText = "▶ START PROCESSING";
+                }
+                return;
+            }
+
+            if(!isProcessing && !isCompleted) {
+                btnStart.className = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
+                btnStart.disabled = false;
+                btnStart.innerText = "▶ START PROCESSING";
+            }
+
+            container.innerHTML = "";
+            filaMusicas.forEach((item, index) => {
+                let optionsHTML = '';
+                opcoesDestinoGlobais.forEach(op => {
+                    let selecionado = (op === item.destino) ? 'selected' : '';
+                    optionsHTML += `<option value="${op}" class="bg-neutral-800 text-white" ${selecionado}>${op}</option>`;
+                });
+
+                let statusIcon = "";
+                let itemOpacidade = "";
+                if(item.status === 'processando') {
+                    statusIcon = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+                } else if(item.status === 'concluido') {
+                    statusIcon = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
+                    itemOpacidade = "opacity-60"; 
+                } else if(item.status === 'erro') {
+                    // NOVO CÓDIGO AQUI: Adiciona o X vermelho e deixa o item com uma cor diferente
+                    statusIcon = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
+                    itemOpacidade = "opacity-60 text-red-400"; 
+                }
+
+                let pointerState = isProcessing ? "pointer-events-none" : "";
+                let dragEnable = isProcessing ? "false" : "true";
+                let cursorState = isProcessing ? "cursor-default" : "cursor-move";
+
+                const filaItemHTML = `
+                <div draggable="${dragEnable}" 
+                     ondragstart="dragStart(${index}, event)" 
+                     ondragend="dragEnd(event)"
+                     ondragover="dragOver(event)" 
+                     ondrop="drop(${index})"
+                     class="group flex items-center justify-between bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 p-2 rounded text-sm transition-colors ${cursorState} ${itemOpacidade}">
+                    
+                    ${!isProcessing ? '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>' : ''}
+                    
+                    ${statusIcon}
+
+                    <input type="text" value="${item.nome}" onchange="editarNomeFila(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                           class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
+                    
+                    <select onchange="editarDestinoFila(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                            class="bg-transparent text-neutral-400 text-xs focus:outline-none cursor-pointer w-1/4 px-1 appearance-none hover:text-neutral-300 ${pointerState}">
+                        ${optionsHTML}
+                    </select>
+                    
+                    <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${item.link}</span>
+                    
+                    ${!isProcessing ? `<button onclick="removerDaFila(${index})" class="text-neutral-500 hover:text-red-400 font-bold ml-1 opacity-0 group-hover:opacity-100 transition-opacity px-2 cursor-pointer">✕</button>` : ''}
+                </div>
+                `;
+                container.innerHTML += filaItemHTML;
+            });
+        }
+
+        function iniciarProcessamento() {
+            if(filaMusicas.length === 0 || isProcessing) return;
+            isProcessing = true;
+            isCompleted = false;
+            
+            const btnStart = document.getElementById('btnStart');
+            btnStart.disabled = true;
+            btnStart.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> PROCESSING...`;
+            btnStart.className = "w-full bg-neutral-700 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-wait border border-neutral-600 transition-colors";
+            
+            atualizarFilaUI(); 
+            
+            if(window.pywebview) {
+                const pastaPrincipal = document.getElementById('pastaPath').innerText;
+                pywebview.api.processar_fila(filaMusicas, pastaPrincipal);
+            }
+        }
+
+        // AGORA RECEBE 3 PARÂMETROS
+        window.atualizarProgressoGlobal = function(porcentagem, textoStatus, textoPorcentagem) {
+            document.getElementById('progressBar').style.width = porcentagem + "%";
+            document.getElementById('percentText').innerText = textoPorcentagem || (porcentagem + "%");
+            document.getElementById('statusText').innerText = textoStatus;
+        };
+
+        window.atualizarStatusItem = function(index, novoStatus) {
+            if(filaMusicas[index]) {
+                filaMusicas[index].status = novoStatus;
+                atualizarFilaUI();
+            }
+        };
+
+        window.finalizarProcessamentoUI = function() {
+            isProcessing = false;
+            isCompleted = true; // Seta a flag de concluído
+            const btnStart = document.getElementById('btnStart');
+            btnStart.className = "w-full bg-green-600 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
+            btnStart.innerText = "✅ COMPLETED!";
+            btnStart.disabled = false;
+            
+            // Força a atualização da interface mais uma vez para o último ✅ aparecer
+            atualizarFilaUI();
+        };
+
+        function testarConexao() {
+            const msgEl = document.getElementById('testMsg');
+            
+            // Reseta as classes de cor e exibe o texto
+            msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity";
+            
+            if(!window.pywebview) {
+                msgEl.innerText = "System is still loading, please wait...";
+                msgEl.classList.add("text-yellow-500");
+                return;
+            }
+            
+            const url = document.getElementById('jellyUrl').value.trim();
+            const api = document.getElementById('jellyApi').value.trim();
+
+            if(!url || !api) {
+                msgEl.innerText = "Please fill in both the URL and the API Key.";
+                msgEl.classList.add("text-red-500");
+                return;
+            }
+
+            // Status de carregamento
+            msgEl.innerText = "Testing connection...";
+            msgEl.classList.add("text-neutral-400");
+
+            // Envia os dados para o Python testar
+            pywebview.api.testar_jellyfin(url, api).then(resposta => {
+                // Remove a cor neutra
+                msgEl.classList.remove("text-neutral-400");
+                
+                // Define a mensagem e a cor com base no status devolvido pelo Python
+                msgEl.innerText = resposta.mensagem;
+                if(resposta.status === 'sucesso') {
+                    msgEl.classList.add("text-green-500");
+                } else {
+                    msgEl.classList.add("text-red-500");
+                }
+            }).catch(erro => {
+                msgEl.classList.remove("text-neutral-400");
+                msgEl.innerText = "❌ Connection failed. Check if the URL is correct and the server is online.";
+                msgEl.classList.add("text-red-500");
+            });
+        }
+
+        // ==========================================
+        // SISTEMA DE MEMÓRIA (SALVAR/CARREGAR AUTOMÁTICO)
+        // ==========================================
+        window.addEventListener('pywebviewready', function() {
+            // Quando a ponte com Python estiver pronta, puxa os dados!
+            pywebview.api.obter_configuracoes().then(config => {
+                document.getElementById('lufsInput').value = config.lufs;
+                document.getElementById('jellyfinCheck').checked = config.jelly_check;
+                document.getElementById('jellyUrl').value = config.jelly_url;
+                document.getElementById('jellyApi').value = config.jelly_api;
+            });
+        });
+
+        // Função que lê a tela e manda pro Python salvar
+        function salvarConfigsAuto() {
+            if(!window.pywebview) return;
+            const dados = {
+                lufs: document.getElementById('lufsInput').value,
+                jelly_check: document.getElementById('jellyfinCheck').checked,
+                jelly_url: document.getElementById('jellyUrl').value,
+                jelly_api: document.getElementById('jellyApi').value
+            };
+            pywebview.api.salvar_configuracoes(dados);
+        }
+
+    </script>
