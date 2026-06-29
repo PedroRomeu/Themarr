@@ -572,12 +572,37 @@ class Api:
         except Exception as e:
             return {"status": "erro", "mensagem": f"Error during cleanup: {str(e)}"}
 
+    def obter_status(self):
+        global estado_global
+        logs = ""
+        while not fila_logs.empty():
+            logs += fila_logs.get()
+            
+        return {
+            "logs": logs,
+            "is_processing": estado_global["is_processing"],
+            "porcentagem": estado_global["porcentagem"],
+            "textoStatus": estado_global["textoStatus"],
+            "textoPorcentagem": estado_global["textoPorcentagem"],
+            "itens_status": estado_global["itens_status"]
+        }
+
     def processar_fila(self, lista_musicas, pasta_anime_raiz):
-        # Inicia numa Thread separada para não travar a janela do Windows!
-        threading.Thread(target=self._executar_fila_thread, args=(lista_musicas, pasta_anime_raiz), daemon=True).start()
+        global estado_global
+        estado_global["is_processing"] = True
+        estado_global["porcentagem"] = 0
+        estado_global["textoStatus"] = "Starting..."
+        estado_global["textoPorcentagem"] = "0%"
+        estado_global["itens_status"] = ["aguardando"] * len(lista_musicas)
+
+        t = threading.Thread(target=self._executar_fila_thread, args=(lista_musicas, pasta_anime_raiz))
+        t.daemon = True
+        t.start()
+        return True
 
     def _executar_fila_thread(self, lista_musicas, pasta_anime_raiz):
-        # 1. Limpa qualquer lixo residual da fila e liga o microfone dos logs!
+        global estado_global
+        
         while not fila_logs.empty():
             fila_logs.get()
         sys.stdout.capturar = True 
@@ -585,10 +610,8 @@ class Api:
         total = len(lista_musicas)
         print(f"\n[SISTEMA] Iniciando fila com {total} itens...\n")
 
-        # 2. CONTAGEM INTELIGENTE DE "MAIN THEMES"
         qtd_main = sum(1 for m in lista_musicas if m['destino'] == 'Main Theme')
         tem_multi_main = qtd_main > 1
-
         temporadas_para_limpar = set()
 
         for i, musica in enumerate(lista_musicas):
@@ -598,18 +621,19 @@ class Api:
             lufs = musica['lufs']
             
             porcentagem = int((i / total) * 100)
-            if i == 0:
-                texto_perc = f"{porcentagem}%"
-            else:
-                texto_perc = f"{i}/{total} ({porcentagem}%)"
+            texto_perc = f"{porcentagem}%" if i == 0 else f"{i}/{total} ({porcentagem}%)"
 
-            janela.evaluate_js(f"window.atualizarStatusItem({i}, 'processando')")
-            janela.evaluate_js(f"window.atualizarProgressoGlobal({porcentagem}, 'Downloading: {nome}...', '{texto_perc}')")
+            # Atualiza o quadro de avisos global
+            estado_global["itens_status"][i] = "processando"
+            estado_global["porcentagem"] = porcentagem
+            estado_global["textoStatus"] = f"Downloading: {nome}..."
+            estado_global["textoPorcentagem"] = texto_perc
 
             try:
                 arquivo_baixado = baixar_musica(link)
                 
-                janela.evaluate_js(f"window.atualizarProgressoGlobal({porcentagem}, 'Normalizing: {nome}...', '{texto_perc}')")
+                estado_global["textoStatus"] = f"Normalizing: {nome}..."
+                
                 if "Season" in destino:
                     tipo_tema = "temporada"
                     pasta_temp = destino
@@ -618,55 +642,44 @@ class Api:
                     tipo_tema = "main"
                     pasta_temp = None
 
-                # 3. USA A VARIÁVEL INTELIGENTE AQUI AO INVÉS DO "TRUE" FIXO
                 caminho_final = gerar_caminho_destino(pasta_anime_raiz, tipo_tema, nome, pasta_temp, multiplos_main=tem_multi_main)
-
                 normalizar_e_salvar(arquivo_baixado, caminho_final, lufs)
                 
                 if os.path.exists(arquivo_baixado):
                     os.remove(arquivo_baixado)
 
-                janela.evaluate_js(f"window.atualizarStatusItem({i}, 'concluido')")
+                estado_global["itens_status"][i] = "concluido"
                 print(f"[SUCESSO] {nome} finalizado com sucesso!")
                 
             except Exception as e:
                 print(f"\n[ERRO] Falha ao processar {nome}: {str(e)}\n")
-                janela.evaluate_js(f"window.atualizarStatusItem({i}, 'erro')")
+                estado_global["itens_status"][i] = "erro"
 
         if temporadas_para_limpar:
             print("\n[SISTEMA] Iniciando Faxina Inteligente nas temporadas afetadas...")
             for temp in temporadas_para_limpar:
                 mover_episodios_soltos(pasta_anime_raiz, temp)
 
-        # =========================================================
-        # NOVO: CHAMADA DO NOSSO MÓDULO DE CAPAS AQUI!
-        # =========================================================
-        janela.evaluate_js(f"window.atualizarProgressoGlobal(99, 'Applying Cover Arts...', '99%')")
+        estado_global["porcentagem"] = 99
+        estado_global["textoStatus"] = "Applying Cover Arts..."
+        estado_global["textoPorcentagem"] = "99%"
         
         config_atual = carregar_config()
-        # Pega automaticamente o nome da pasta (ex: "86: Eighty-Six (2021)")
         nome_do_anime = os.path.basename(pasta_anime_raiz)
         
-        # Respeita a caixinha "Fetch Metadata from Jellyfin" do HTML
         if not config_atual.get("jelly_check"):
-            # Se a caixinha estiver desmarcada, limpamos temporariamente os dados do Jellyfin
-            # Assim, a nossa função tenta APENAS procurar imagem local na pasta e pula a internet.
             config_atual["jelly_url"] = ""
             config_atual["jelly_api"] = ""
 
-        # Chama a função que criamos hoje!
-        processar_capas_pasta_atual(
-            caminho_pasta_anime=pasta_anime_raiz,
-            nome_pasta_anime=nome_do_anime,
-            config=config_atual
-        )
+        processar_capas_pasta_atual(pasta_anime_raiz, nome_do_anime, config_atual)
 
-        texto_final = f"{total}/{total} (100%)"
-        janela.evaluate_js(f"window.atualizarProgressoGlobal(100, 'All operations completed!', '{texto_final}')")
-        janela.evaluate_js("window.finalizarProcessamentoUI()")
-        print("\n[SISTEMA] Fila concluída com sucesso! Aguardando novos comandos...")
+        # Processo terminado!
+        estado_global["porcentagem"] = 100
+        estado_global["textoStatus"] = "All operations completed!"
+        estado_global["textoPorcentagem"] = f"{total}/{total} (100%)"
+        estado_global["is_processing"] = False # Desliga a flag de processamento!
         
-        # 4. Desliga o log ao terminar para não pegar ruídos pós-processamento
+        print("\n[SISTEMA] Fila concluída com sucesso! Aguardando novos comandos...")
         sys.stdout.capturar = False
 
 
@@ -689,6 +702,53 @@ class Api:
     def salvar_configuracoes(self, dados):
         salvar_config(dados)
         return True
+
+# ========================================================
+# ESTADO GLOBAL DO SISTEMA (Novo Padrão Polling)
+# ========================================================
+estado_global = {
+    "is_processing": False,
+    "porcentagem": 0,
+    "textoStatus": "Ready",
+    "textoPorcentagem": "0%",
+    "itens_status": []  # Guarda se o item está em 'aguardando', 'processando', 'concluido' ou 'erro'
+}
+
+# ========================================================
+# ROTAS DO FLASK PARA O MODO NAVEGADOR (O "PLANO B")
+# ========================================================
+# Criamos a API aqui fora para o Flask e a Janela usarem a mesma!
+api_sistema = Api() 
+
+@app.route('/api/selecionar_pasta', methods=['POST'])
+def flask_selecionar_pasta():
+    # Chama a função da API e retorna como JSON pro navegador
+    resultado = api_sistema.selecionar_pasta()
+    return jsonify(resultado)
+
+@app.route('/api/obter_configuracoes', methods=['GET'])
+def flask_obter_configuracoes():
+    return jsonify(api_sistema.obter_configuracoes())
+
+@app.route('/api/salvar_configuracoes', methods=['POST'])
+def flask_salvar_configuracoes():
+    dados = request.json
+    api_sistema.salvar_configuracoes(dados)
+    return jsonify({"status": "sucesso"})
+
+@app.route('/api/processar_fila', methods=['POST'])
+def api_flask_processar_fila():
+    dados = request.json
+    fila = dados.get('fila', [])
+    pasta = dados.get('pasta', '')
+    api_sistema.processar_fila(fila, pasta)
+    return jsonify({"status": "sucesso"})
+
+@app.route('/api/status', methods=['GET'])
+def api_flask_status():
+    return jsonify(api_sistema.obter_status())
+
+# ========================================================
 
 def iniciar_servidor():
     app.run(host='127.0.0.1', port=5000, debug=False)

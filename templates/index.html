@@ -32,23 +32,23 @@
         </header>
 
         <section class="mb-5">
-    <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Media Directory</h2>
-    <div class="flex items-center gap-3 bg-neutral-800 border border-neutral-700 rounded-md p-1.5 shadow-sm">
-        <button onclick="escolherPasta()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
-            📂 Browse
-        </button>
-        <span id="pastaPath" class="text-neutral-400 text-sm truncate w-full px-2">No folder selected...</span>
-    </div>
-    
-    <div class="mt-2 flex gap-3 justify-end px-1">
-        <button onclick="abrirModalApagar()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
-            🗑️ Clear Folder
-        </button>
-        <button onclick="abrirModalEnhance()" class="text-xs text-neutral-500 hover:text-purple-400 transition-colors flex items-center gap-1.5 py-0.5">
-            ✨ Enhance Themes
-        </button>
-    </div>
-</section>
+            <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Media Directory</h2>
+            <div class="flex items-center gap-3 bg-neutral-800 border border-neutral-700 rounded-md p-1.5 shadow-sm">
+                <button onclick="escolherPasta()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
+                    📂 Browse
+                </button>
+                <span id="pastaPath" class="text-neutral-400 text-sm truncate w-full px-2">No folder selected...</span>
+            </div>
+            
+            <div class="mt-2 flex gap-3 justify-end px-1">
+                <button onclick="abrirModalApagar()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
+                    🗑️ Clear Folder
+                </button>
+                <button onclick="abrirModalEnhance()" class="text-xs text-neutral-500 hover:text-purple-400 transition-colors flex items-center gap-1.5 py-0.5">
+                    ✨ Enhance Themes
+                </button>
+            </div>
+        </section>
 
         <section class="mb-5">
             <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">2. Track Details</h2>
@@ -132,13 +132,10 @@ System ready. Awaiting tasks...
                 </button>
 
                 <p id="testMsg" class="text-sm font-bold text-center mt-2 hidden transition-opacity"></p>
-
             </div>
         </div>
     </div>
 
-    </div>
-        </div>
     <div id="deleteModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 transition-opacity backdrop-blur-sm">
         <div class="bg-neutral-800 border border-neutral-700 rounded-md p-5 max-w-xs w-full shadow-xl">
             <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -189,11 +186,54 @@ System ready. Awaiting tasks...
         </div>
     </div>
 
-<script>
+    <script>
+        // ===================================================================
+        // MÁGICA GLOBAL (V2): Cria um pywebview falso se rodar no navegador
+        // ===================================================================
+        setTimeout(() => {
+            if (!window.pywebview || !window.pywebview.api) {
+                console.log("🌐 Modo Navegador detectado! Ativando backend Flask.");
+                
+                window.pywebview = {
+                    api: {
+                        selecionar_pasta: async () => {
+                            let res = await fetch('/api/selecionar_pasta', { method: 'POST' });
+                            return await res.json();
+                        },
+                        obter_configuracoes: async () => {
+                            let res = await fetch('/api/obter_configuracoes');
+                            return await res.json();
+                        },
+                        salvar_configuracoes: async (dados) => {
+                            await fetch('/api/salvar_configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) });
+                        },
+                        processar_fila: async (fila, pasta) => {
+                            await fetch('/api/processar_fila', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fila: fila, pasta: pasta }) });
+                        },
+                        obter_status: async () => {
+                            let res = await fetch('/api/status');
+                            return await res.json();
+                        },
+                        apagar_musicas_pasta: async (pasta) => {
+                            let res = await fetch('/api/apagar_musicas_pasta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pasta: pasta }) });
+                            return await res.json();
+                        },
+                        melhorar_musicas_locais: async (pasta, modoBatch, lufs) => {
+                            let res = await fetch('/api/melhorar_musicas_locais', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pasta: pasta, modoBatch: modoBatch, lufs: lufs }) });
+                            return await res.json();
+                        },
+                        testar_jellyfin: async (url, api) => {
+                            let res = await fetch('/api/testar_jellyfin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, api: api }) });
+                            return await res.json();
+                        }
+                    }
+                };
+                window.dispatchEvent(new CustomEvent('pywebviewready'));
+            }
+        }, 500);
 
         function abrirModalApagar() {
             const pasta = document.getElementById('pastaPath').innerText; 
-        
             if (pasta === "No folder selected..." || pasta.trim() === "") {
                 alert("Please select a Media Directory first!");
                 return;
@@ -205,91 +245,85 @@ System ready. Awaiting tasks...
             document.getElementById('deleteModal').classList.add('hidden');
         }
 
-    function mostrarToast(mensagem, status) {
-        const toast = document.getElementById('toastNotification');
-        const toastMsg = document.getElementById('toastMessage');
-        const toastIcon = document.getElementById('toastIcon');
-        
-        toastMsg.innerText = mensagem;
-        toastIcon.innerText = status === 'sucesso' ? '✅' : '❌';
-        
-        // Faz o Toast aparecer deslizando para cima
-        toast.classList.remove('hidden');
-        setTimeout(() => {
-            toast.classList.remove('translate-y-10', 'opacity-0');
-        }, 10);
-        
-        // Some sozinho após 3.5 segundos
-        setTimeout(() => {
-            toast.classList.add('translate-y-10', 'opacity-0');
-            setTimeout(() => toast.classList.add('hidden'), 300); // Aguarda a animação terminar
-        }, 3500);
-    }
-
-    function confirmarApagar() {
-        fecharModalApagar();
-        const pasta = document.getElementById('pastaPath').innerText;
-        
-        if(window.pywebview) {
-            pywebview.api.apagar_musicas_pasta(pasta).then(res => {
-                // Chama a nossa nova notificação bonitona!
-                mostrarToast(res.mensagem, res.status);
-            });
+        function mostrarToast(mensagem, status) {
+            const toast = document.getElementById('toastNotification');
+            const toastMsg = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+            
+            toastMsg.innerText = message = mensagem;
+            toastIcon.innerText = status === 'sucesso' ? '✅' : '❌';
+            
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            }, 10);
+            
+            setTimeout(() => {
+                toast.classList.add('translate-y-10', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3500);
         }
-    }
 
-    // --- FUNÇÕES DE ENHANCE ---
-    function abrirModalEnhance() {
-        const pasta = document.getElementById('pastaPath').innerText; 
-        if (pasta === "No folder selected..." || pasta.trim() === "") {
-            mostrarToast("Please select a Media Directory first!", "erro");
-            return;
+        function confirmarApagar() {
+            fecharModalApagar();
+            const pasta = document.getElementById('pastaPath').innerText;
+            if(window.pywebview) {
+                pywebview.api.apagar_musicas_pasta(pasta).then(res => {
+                    mostrarToast(res.mensagem, res.status);
+                });
+            }
         }
-        document.getElementById('enhanceModal').classList.remove('hidden');
-    }
 
-    function fecharModalEnhance() {
-        document.getElementById('enhanceModal').classList.add('hidden');
-    }
-
-    function confirmarEnhance(modoBatch) {
-        fecharModalEnhance();
-        const pasta = document.getElementById('pastaPath').innerText;
-        const lufsAtual = document.getElementById('lufsInput').value; // Puxa o volume que tá na tela
-        
-        mostrarToast("⏳ Processing audio... This might take a while.", "sucesso");
-
-        if(window.pywebview) {
-            pywebview.api.melhorar_musicas_locais(pasta, modoBatch, lufsAtual).then(res => {
-                mostrarToast(res.mensagem, res.status);
-            });
+        function abrirModalEnhance() {
+            const pasta = document.getElementById('pastaPath').innerText; 
+            if (pasta === "No folder selected..." || pasta.trim() === "") {
+                mostrarToast("Please select a Media Directory first!", "erro");
+                return;
+            }
+            document.getElementById('enhanceModal').classList.remove('hidden');
         }
-    }
+
+        function fecharModalEnhance() {
+            document.getElementById('enhanceModal').classList.add('hidden');
+        }
+
+        function confirmarEnhance(modoBatch) {
+            fecharModalEnhance();
+            const pasta = document.getElementById('pastaPath').innerText;
+            const lufsAtual = document.getElementById('lufsInput').value;
+            mostrarToast("⏳ Processing audio... This might take a while.", "sucesso");
+
+            if(window.pywebview) {
+                pywebview.api.melhorar_musicas_locais(pasta, modoBatch, lufsAtual).then(res => {
+                    mostrarToast(res.mensagem, res.status);
+                });
+            }
+        }
 
         let filaMusicas = []; 
         let opcoesDestinoGlobais = [];
         let dragStartIndex = null; 
         let isProcessing = false; 
-        let isCompleted = false; // <-- NOVA FLAG DE RESET
+        let isCompleted = false; 
 
         function toggleModal(modalID) { document.getElementById(modalID).classList.toggle("hidden"); }
 
         function alterarVolume(delta) {
-         let input = document.getElementById('lufsInput');
-         let valorAtual = parseInt(input.value) || 0;
-         let novoValor = valorAtual + delta;
-         if(novoValor > 0) novoValor = 0; 
-         if(novoValor < -70) novoValor = -70; 
-         input.value = novoValor;
-         salvarConfigsAuto(); // <-- ADICIONE AQUI
-     }
+            let input = document.getElementById('lufsInput');
+            let valorAtual = parseInt(input.value) || 0;
+            let novoValor = valorAtual + delta;
+            if(novoValor > 0) novoValor = 0; 
+            if(novoValor < -70) novoValor = -70; 
+            input.value = novoValor;
+            salvarConfigsAuto();
+        }
         
         function validarDigitacaoLUFS(input) {
-         if (input.value === "" || input.value === "-") return;
-         let valor = parseInt(input.value);
-         if (isNaN(valor) || valor > 0) input.value = "0";
-         salvarConfigsAuto(); // <-- ADICIONE AQUI
-     }
+            if (input.value === "" || input.value === "-") return;
+            let valor = parseInt(input.value);
+            if (isNaN(valor) || valor > 0) input.value = "0";
+            salvarConfigsAuto();
+        }
 
         function toggleLog() {
             const container = document.getElementById('logContainer');
@@ -309,18 +343,45 @@ System ready. Awaiting tasks...
             container.scrollTop = container.scrollHeight;
         }
 
+        // ===================================================================
+        // SISTEMA CENTRAL DE MONITORIZAÇÃO (POLLING) - 100% HÍBRIDO
+        // ===================================================================
         setInterval(async () => {
+            if (!window.pywebview || !window.pywebview.api) return;
+
             try {
-                let res = await fetch('http://127.0.0.1:5000/api/logs');
-                let data = await res.json();
-                if(data.logs) adicionarTextoLog(data.logs);
-            } catch(e) {}
+                let data = await pywebview.api.obter_status();
+
+                if (data.logs && data.logs.trim() !== "") {
+                    adicionarTextoLog(data.logs);
+                }
+
+                // CORREÇÃO VISUAL: Só atualiza a barra global se estiver de fato processando
+                if (data.porcentagem !== undefined && isProcessing) {
+                    window.atualizarProgressoGlobal(data.porcentagem, data.textoStatus, data.textoPorcentagem);
+                }
+                
+                if (data.itens_status) {
+                    data.itens_status.forEach((status_item, index) => {
+                        window.atualizarStatusItem(index, status_item);
+                    });
+                }
+
+                if (data.is_processing) {
+                    isProcessing = true;
+                } else if (isProcessing && !data.is_processing) {
+                    isProcessing = false;
+                    window.finalizarProcessamentoUI();
+                }
+
+            } catch (e) {
+                // Silencioso
+            }
         }, 500);
 
         function escolherPasta() {
             if(isProcessing) return; 
             
-            // --- SISTEMA DE RESET ---
             if(isCompleted) {
                 filaMusicas = [];
                 isCompleted = false;
@@ -363,7 +424,6 @@ System ready. Awaiting tasks...
         function adicionarNaFila() {
             if(isProcessing) return; 
             
-            // Se o usuário tentar adicionar música após o ✅ COMPLETED, resetamos apenas a UI inferior
             if(isCompleted) {
                 isCompleted = false;
                 filaMusicas = [];
@@ -455,7 +515,6 @@ System ready. Awaiting tasks...
                     statusIcon = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
                     itemOpacidade = "opacity-60"; 
                 } else if(item.status === 'erro') {
-                    // NOVO CÓDIGO AQUI: Adiciona o X vermelho e deixa o item com uma cor diferente
                     statusIcon = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
                     itemOpacidade = "opacity-60 text-red-400"; 
                 }
@@ -464,8 +523,9 @@ System ready. Awaiting tasks...
                 let dragEnable = isProcessing ? "false" : "true";
                 let cursorState = isProcessing ? "cursor-default" : "cursor-move";
 
+                // ADICIONADOS IDENTIFICADORES id, data-status E CLASSE CORRETOS
                 const filaItemHTML = `
-                <div draggable="${dragEnable}" 
+                <div id="fila-item-${index}" data-status="${item.status}" draggable="${dragEnable}" 
                      ondragstart="dragStart(${index}, event)" 
                      ondragend="dragEnd(event)"
                      ondragover="dragOver(event)" 
@@ -474,7 +534,7 @@ System ready. Awaiting tasks...
                     
                     ${!isProcessing ? '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>' : ''}
                     
-                    ${statusIcon}
+                    <div class="status-icon flex items-center">${statusIcon}</div>
 
                     <input type="text" value="${item.nome}" onchange="editarNomeFila(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
                            class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
@@ -494,53 +554,107 @@ System ready. Awaiting tasks...
         }
 
         function iniciarProcessamento() {
+            // CORREÇÃO DO RESET: Zera tudo corretamente e apaga o filaContainer
+            if (isCompleted) {
+                filaMusicas = [];
+                document.getElementById('filaContainer').innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
+                
+                document.getElementById('progressBar').style.width = "0%";
+                document.getElementById('percentText').innerText = "0%";
+                document.getElementById('statusText').innerText = "Ready";
+                
+                const btnStart = document.getElementById('btnStart');
+                btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
+                btnStart.innerText = "▶ START PROCESSING";
+                btnStart.disabled = true;
+                
+                isCompleted = false;
+                return;
+            }
+
             if(filaMusicas.length === 0 || isProcessing) return;
+
             isProcessing = true;
             isCompleted = false;
             
             const btnStart = document.getElementById('btnStart');
+            btnStart.className = "w-full bg-purple-900/50 text-purple-300 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-purple-700/50 shadow-[0_0_15px_rgba(168,85,247,0.2)] flex items-center justify-center gap-2";
+            btnStart.innerHTML = `<svg class="animate-spin h-4 w-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> PROCESSING...`;
             btnStart.disabled = true;
-            btnStart.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> PROCESSING...`;
-            btnStart.className = "w-full bg-neutral-700 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-wait border border-neutral-600 transition-colors";
-            
-            atualizarFilaUI(); 
-            
-            if(window.pywebview) {
-                const pastaPrincipal = document.getElementById('pastaPath').innerText;
-                pywebview.api.processar_fila(filaMusicas, pastaPrincipal);
+
+            const pastaPrincipal = document.getElementById('pastaPath').innerText.trim();
+            if (!pastaPrincipal || pastaPrincipal === "No folder selected...") {
+                 alert("Selecione um diretório primeiro!");
+                 isProcessing = false;
+                 atualizarFilaUI();
+                 return;
             }
+
+            pywebview.api.processar_fila(filaMusicas, pastaPrincipal).catch(err => {
+                console.error("Erro ao iniciar fila:", err);
+            });
         }
 
-        // AGORA RECEBE 3 PARÂMETROS
         window.atualizarProgressoGlobal = function(porcentagem, textoStatus, textoPorcentagem) {
             document.getElementById('progressBar').style.width = porcentagem + "%";
             document.getElementById('percentText').innerText = textoPorcentagem || (porcentagem + "%");
             document.getElementById('statusText').innerText = textoStatus;
         };
 
+        // CORREÇÃO DOS ÍCONES: Variáveis corrigidas de status para novoStatus + manipulação correta das classes
         window.atualizarStatusItem = function(index, novoStatus) {
-            if(filaMusicas[index]) {
-                filaMusicas[index].status = novoStatus;
-                atualizarFilaUI();
+            let item = document.getElementById(`fila-item-${index}`);
+            if(!item) return;
+
+            let statusAtual = item.getAttribute('data-status') || 'pendente';
+            if (statusAtual === novoStatus) return; 
+
+            item.setAttribute('data-status', novoStatus);
+            
+            let statusDiv = item.querySelector('.status-icon');
+            if(!statusDiv) return;
+
+            if(novoStatus === 'processando') {
+                statusDiv.innerHTML = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+                item.classList.remove('opacity-60', 'text-red-400');
+                item.classList.add('opacity-100');
+            } else if(novoStatus === 'concluido') {
+                statusDiv.innerHTML = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
+                item.classList.remove('opacity-100', 'text-red-400');
+                item.classList.add('opacity-60');
+                if(filaMusicas[index]) filaMusicas[index].status = 'concluido';
+            } else if(novoStatus === 'erro') {
+                statusDiv.innerHTML = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
+                item.classList.remove('opacity-100');
+                item.classList.add('opacity-60', 'text-red-400');
+                if(filaMusicas[index]) filaMusicas[index].status = 'erro';
             }
         };
 
         window.finalizarProcessamentoUI = function() {
             isProcessing = false;
-            isCompleted = true; // Seta a flag de concluído
+            isCompleted = true; 
+            
+            // Força a barra para 100% no final de forma fixa e visual
+            window.atualizarProgressoGlobal(100, "All Done!", "100%");
+            
             const btnStart = document.getElementById('btnStart');
             btnStart.className = "w-full bg-green-600 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
             btnStart.innerText = "✅ COMPLETED!";
             btnStart.disabled = false;
             
-            // Força a atualização da interface mais uma vez para o último ✅ aparecer
+            // Garante que o estado em memória reflita a conclusão dos itens pendentes
+            filaMusicas.forEach((item) => {
+                if(item.status === 'pendente' || item.status === 'processando') {
+                    item.status = 'concluido';
+                }
+            });
+
             atualizarFilaUI();
         };
 
         function testarConexao() {
             const msgEl = document.getElementById('testMsg');
-            
-            // Reseta as classes de cor e exibe o texto
             msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity";
             
             if(!window.pywebview) {
@@ -558,16 +672,11 @@ System ready. Awaiting tasks...
                 return;
             }
 
-            // Status de carregamento
             msgEl.innerText = "Testing connection...";
             msgEl.classList.add("text-neutral-400");
 
-            // Envia os dados para o Python testar
             pywebview.api.testar_jellyfin(url, api).then(resposta => {
-                // Remove a cor neutra
                 msgEl.classList.remove("text-neutral-400");
-                
-                // Define a mensagem e a cor com base no status devolvido pelo Python
                 msgEl.innerText = resposta.mensagem;
                 if(resposta.status === 'sucesso') {
                     msgEl.classList.add("text-green-500");
@@ -581,11 +690,7 @@ System ready. Awaiting tasks...
             });
         }
 
-        // ==========================================
-        // SISTEMA DE MEMÓRIA (SALVAR/CARREGAR AUTOMÁTICO)
-        // ==========================================
         window.addEventListener('pywebviewready', function() {
-            // Quando a ponte com Python estiver pronta, puxa os dados!
             pywebview.api.obter_configuracoes().then(config => {
                 document.getElementById('lufsInput').value = config.lufs;
                 document.getElementById('jellyfinCheck').checked = config.jelly_check;
@@ -594,7 +699,6 @@ System ready. Awaiting tasks...
             });
         });
 
-        // Função que lê a tela e manda pro Python salvar
         function salvarConfigsAuto() {
             if(!window.pywebview) return;
             const dados = {
@@ -605,5 +709,6 @@ System ready. Awaiting tasks...
             };
             pywebview.api.salvar_configuracoes(dados);
         }
-
     </script>
+</body>
+</html>
