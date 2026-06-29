@@ -47,17 +47,20 @@ Themarr is evolving from a standalone desktop application into a lightweight, de
 
 ## 🗺️ Roadmap
 
-[x] Multithreading architecture for responsive UI.
+**Completed:**
+- [x] Multithreading architecture for responsive UI.
+- [x] Advanced FFmpeg audio normalization pipeline.
+- [x] Jellyfin API connection validation helper.
+- [x] Transition to a local lightweight Web-Server backend (Flask + PyWebView).
 
-[x] Advanced FFmpeg audio normalization pipeline.
-
-[x] Jellyfin API connection validation helper.
-
-[ ] Automated ID3 Tag & Poster artwork injection.
-
-[ ] Transition to a local lightweight Web-Server backend.
-
-[ ] Jellyfin Custom Dashboard integration support.
+**Upcoming Features:**
+- [ ] **Automated Metadata Injection:** ID3 Tag & Poster artwork injection for downloaded tracks.
+- [ ] **Advanced Audio Post-Processing:** Inject custom audio effects (e.g., automated fade-in/fade-out, crossfades).
+- [ ] **Robust Error Handling:** Comprehensive anti-crash system with intelligent fallback mechanisms.
+- [ ] **Local Library Management:** Advanced tools to identify, customize, and manage already downloaded media within the app.
+- [ ] **In-App Media Search Engine:** Built-in search bar for YouTube (and other supported repositories) to queue tracks directly without leaving the app.
+- [ ] **Playlist Parsing:** Native support for bulk-importing and batch-downloading entire playlists automatically.
+- [ ] **Jellyfin Dashboard:** Custom Dashboard integration support.
 
 ## 📄 License
 
