@@ -12,6 +12,8 @@ import requests
 import logging
 import re
 import tempfile
+import subprocess
+import shutil
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # Manda o Flask silenciar as mensagens de "GET /api/logs"
@@ -46,6 +48,42 @@ class RedirecionadorLog:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg.exe')
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
+
+def normalizar_audio_ffmpeg(caminho_mp3, lufs_alvo):
+    """
+    Roda o FFmpeg para normalizar o áudio, imitando a lógica segura do seu arquivo .bat antigo.
+    """
+    arquivo_temp = caminho_mp3 + ".temp.mp3"
+    
+    # A CORREÇÃO FOI AQUI: Substituímos "ffmpeg" por FFMPEG_PATH
+    comando = [
+        FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", caminho_mp3,
+        "-filter:a", f"loudnorm=I={lufs_alvo}:LRA=11:TP=-1.0",
+        "-b:a", "320k",
+        arquivo_temp
+    ]
+    
+    try:
+        # Executa sem abrir janelas pretas (startupinfo protege isso no Windows)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+        subprocess.run(comando, check=True, startupinfo=startupinfo)
+        
+        # Verifica se deu certo e se o arquivo não está vazio (como no seu .bat)
+        if os.path.exists(arquivo_temp) and os.path.getsize(arquivo_temp) > 0:
+            shutil.move(arquivo_temp, caminho_mp3) # Substitui silenciosamente
+            return True
+        else:
+            if os.path.exists(arquivo_temp):
+                os.remove(arquivo_temp)
+            return False
+    except Exception as e:
+        print(f"[FFMPEG] ❌ Erro ao normalizar {caminho_mp3}: {e}")
+        if os.path.exists(arquivo_temp):
+            os.remove(arquivo_temp)
+        return False
 
 # ==========================================
 # FUNÇÕES DE MEMÓRIA (CONFIGURAÇÕES)
@@ -423,6 +461,116 @@ class Api:
                 print(f"Erro ao ler pasta: {e}")
             return {"sucesso": True, "caminho": pasta, "temporadas": temporadas}
         return {"sucesso": False}
+
+    def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo):
+        """
+        Varre as pastas procurando MP3. Se achar, aplica FFmpeg e injeta Metadados Jellyfin.
+        Se modo_batch for True, ele processa todas as subpastas.
+        """
+        if not pasta_alvo or not os.path.exists(pasta_alvo):
+            return {"status": "erro", "mensagem": "Invalid directory."}
+            
+        try:
+            # ==========================================================
+            # 1. LIGA O MICROFONE DOS LOGS (Limpa a fila e começa a gravar)
+            # ==========================================================
+            while not fila_logs.empty():
+                fila_logs.get()
+            sys.stdout.capturar = True 
+
+            print("\n=======================================================")
+            print("[ENHANCE] Iniciando processo de melhoria de áudio...")
+            print(f"[ENHANCE] Modo Batch (Todas as subpastas): {'Sim' if modo_batch else 'Não'}")
+            print(f"[ENHANCE] Volume Alvo: {lufs_alvo} LUFS")
+            print("=======================================================\n")
+
+            arquivos_afetados = 0
+            pastas_para_processar = []
+            
+            if modo_batch:
+                for item in os.listdir(pasta_alvo):
+                    caminho_item = os.path.join(pasta_alvo, item)
+                    if os.path.isdir(caminho_item):
+                        pastas_para_processar.append(caminho_item)
+            else:
+                pastas_para_processar.append(pasta_alvo)
+
+            config_atual = self.obter_configuracoes() 
+            
+            for pasta_anime in pastas_para_processar:
+                nome_anime = os.path.basename(pasta_anime)
+                mp3s_nesta_pasta = []
+                
+                for raiz, _, arquivos in os.walk(pasta_anime):
+                    for arquivo in arquivos:
+                        if arquivo.lower().endswith('.mp3'):
+                            caminho_mp3 = os.path.join(raiz, arquivo)
+                            mp3s_nesta_pasta.append(caminho_mp3)
+                
+                if not mp3s_nesta_pasta:
+                    continue 
+                
+                print(f"\n[ENHANCE] ✨ Melhorando áudios na pasta: {nome_anime}")
+                
+                for mp3 in mp3s_nesta_pasta:
+                    print(f"[ENHANCE] 🎚️ Normalizando: {os.path.basename(mp3)}")
+                    if normalizar_audio_ffmpeg(mp3, lufs_alvo):
+                        arquivos_afetados += 1
+                        
+                # Aplica as capas (essa função já tem os próprios prints!)
+                processar_capas_pasta_atual(pasta_anime, nome_anime, config_atual)
+                
+            print("\n=======================================================")
+            print(f"[ENHANCE] Concluído! {arquivos_afetados} arquivo(s) modificado(s).")
+            print("=======================================================\n")
+            
+            if arquivos_afetados > 0:
+                return {"status": "sucesso", "mensagem": f"Done! {arquivos_afetados} files enhanced."}
+            else:
+                return {"status": "sucesso", "mensagem": "No .mp3 files found to enhance."}
+                
+        except Exception as e:
+            print(f"\n[ENHANCE] ❌ Erro crítico: {e}")
+            return {"status": "erro", "mensagem": f"Error: {str(e)}"}
+            
+        finally:
+            # ==========================================================
+            # 2. DESLIGA O MICROFONE DOS LOGS
+            # Isso é vital para não ficar capturando lixo interno do Python depois
+            # ==========================================================
+            sys.stdout.capturar = False
+
+    def apagar_musicas_pasta(self, pasta_raiz):
+        """
+        Varre a pasta principal e todas as subpastas procurando e apagando arquivos .mp3.
+        Também apaga as pastas 'theme-music' se elas ficarem vazias.
+        """
+        if not pasta_raiz or not os.path.exists(pasta_raiz):
+            return {"status": "erro", "mensagem": "Invalid or missing directory."}
+        
+        apagados = 0
+        try:
+            # 1. Varre tudo de cima a baixo procurando .mp3
+            for raiz, subpastas, arquivos in os.walk(pasta_raiz):
+                for arquivo in arquivos:
+                    if arquivo.lower().endswith('.mp3'):
+                        caminho_completo = os.path.join(raiz, arquivo)
+                        os.remove(caminho_completo)
+                        apagados += 1
+            
+            # 2. Varre de baixo para cima tentando apagar pastas 'theme-music' vazias
+            for raiz, subpastas, arquivos in os.walk(pasta_raiz, topdown=False):
+                for subpasta in subpastas:
+                    if subpasta.lower() == 'theme-music':
+                        caminho_sub = os.path.join(raiz, subpasta)
+                        # Verifica se a pasta está vazia
+                        if not os.listdir(caminho_sub): 
+                            os.rmdir(caminho_sub)
+                            
+            return {"status": "sucesso", "mensagem": f"Cleaned up! {apagados} audio file(s) removed."}
+            
+        except Exception as e:
+            return {"status": "erro", "mensagem": f"Error during cleanup: {str(e)}"}
 
     def processar_fila(self, lista_musicas, pasta_anime_raiz):
         # Inicia numa Thread separada para não travar a janela do Windows!
