@@ -18,6 +18,16 @@ import socket
 import tkinter as tk
 from tkinter import filedialog
 
+def obter_caminho_base():
+    if getattr(sys, 'frozen', False):
+        # Se estiver rodando como .exe (compilado pelo PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Se estiver rodando como script no VS Code
+        return os.path.dirname(os.path.abspath(__file__))
+    
+PASTA_RAIZ_APP = obter_caminho_base()
+
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # Manda o Flask silenciar as mensagens de "GET /api/logs"
 
@@ -48,7 +58,7 @@ class RedirecionadorLog:
 
 # --- 2. REINTEGRANDO CONFIGURAÇÕES E CAMINHOS ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg.exe')
+FFMPEG_PATH = os.path.join(PASTA_RAIZ_APP, 'bin', 'ffmpeg.exe')
 
 # NOVA LÓGICA: Salva o config na pasta de perfil do usuário logado no Windows
 USER_HOME = os.path.expanduser('~')
@@ -128,12 +138,17 @@ def salvar_config(dados):
 # --- 3. REINTEGRANDO SUAS FUNÇÕES DE DOWNLOAD E CONVERSÃO ---
 def baixar_musica(url_youtube):
     print(f"\n[1] Iniciando o download: {url_youtube}")
+    
+    # MÁGICA 1: Pega a pasta secreta temporária do Windows para não sujar o sistema
+    pasta_temp_so = tempfile.gettempdir() 
+    
     configuracoes = {
         'format': 'bestaudio/best',
         'ffmpeg_location': FFMPEG_PATH,
         'extractor_args': {'youtube': {'client': ['android']}},
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
-        'outtmpl': '%(title)s.%(ext)s',
+        # MÁGICA 2: Manda o yt-dlp salvar o arquivo lá!
+        'outtmpl': os.path.join(pasta_temp_so, '%(title)s.%(ext)s'),
         'nocolor': True,
     }
     with yt_dlp.YoutubeDL(configuracoes) as ydl:
@@ -169,7 +184,12 @@ def normalizar_e_salvar(arquivo_entrada, caminho_saida_completo, volume_lufs):
         '-i', arquivo_entrada, '-filter:a', f'loudnorm=I={volume_lufs}:LRA=11:TP=-1.0', '-b:a', '320k',
         caminho_saida_completo
     ]
-    subprocess.run(comando, check=True)
+    
+    # A CORREÇÃO DE OURO: Esconde a janela do FFmpeg para não dar crash no .exe
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    
+    subprocess.run(comando, check=True, startupinfo=startupinfo)
     print("Sucesso! Arquivo pronto e no lugar certo.")
 
 def mover_episodios_soltos(pasta_raiz, pasta_temporada):
@@ -638,12 +658,12 @@ class Api:
             porcentagem = int((i / total) * 100)
             texto_perc = f"{porcentagem}%" if i == 0 else f"{i}/{total} ({porcentagem}%)"
 
-            # Atualiza o quadro de avisos global
             estado_global["itens_status"][i] = "processando"
             estado_global["porcentagem"] = porcentagem
             estado_global["textoStatus"] = f"Downloading: {nome}..."
             estado_global["textoPorcentagem"] = texto_perc
 
+            arquivo_baixado = None # Cria a variável vazia primeiro
             try:
                 arquivo_baixado = baixar_musica(link)
                 
@@ -660,15 +680,20 @@ class Api:
                 caminho_final = gerar_caminho_destino(pasta_anime_raiz, tipo_tema, nome, pasta_temp, multiplos_main=tem_multi_main)
                 normalizar_e_salvar(arquivo_baixado, caminho_final, lufs)
                 
-                if os.path.exists(arquivo_baixado):
-                    os.remove(arquivo_baixado)
-
                 estado_global["itens_status"][i] = "concluido"
                 print(f"[SUCESSO] {nome} finalizado com sucesso!")
                 
             except Exception as e:
                 print(f"\n[ERRO] Falha ao processar {nome}: {str(e)}\n")
                 estado_global["itens_status"][i] = "erro"
+                
+            finally:
+                # FAXINA GARANTIDA: Independentemente de ter dado sucesso ou erro fatal, o lixo temporário some!
+                if arquivo_baixado and os.path.exists(arquivo_baixado):
+                    try:
+                        os.remove(arquivo_baixado)
+                    except Exception as e:
+                        print(f"[AVISO] Não foi possível apagar o lixo temporário: {e}")
 
         if temporadas_para_limpar:
             print("\n[SISTEMA] Iniciando Faxina Inteligente nas temporadas afetadas...")
