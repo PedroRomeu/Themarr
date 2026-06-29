@@ -14,6 +14,9 @@ import re
 import tempfile
 import subprocess
 import shutil
+import socket
+import tkinter as tk
+from tkinter import filedialog
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) # Manda o Flask silenciar as mensagens de "GET /api/logs"
@@ -27,14 +30,13 @@ fila_logs = queue.Queue()
 class RedirecionadorLog:
     def __init__(self, terminal_original):
         self.terminal = terminal_original
-        self.capturar = False # <-- COMEÇA DESLIGADO PARA IGNORAR O LIXO INICIAL
+        self.capturar = True # <-- AGORA FICA LIGADO DESDE O INÍCIO!
 
     def write(self, texto):
         if self.terminal:
             self.terminal.write(texto)
             self.terminal.flush()
         
-        # Só manda para a interface web se a captura estiver ligada
         if self.capturar:
             texto_limpo = texto.replace('\r', '\n')
             if texto_limpo:
@@ -47,7 +49,13 @@ class RedirecionadorLog:
 # --- 2. REINTEGRANDO CONFIGURAÇÕES E CAMINHOS ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_PATH = os.path.join(BASE_DIR, 'bin', 'ffmpeg.exe')
-CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
+
+# NOVA LÓGICA: Salva o config na pasta de perfil do usuário logado no Windows
+USER_HOME = os.path.expanduser('~')
+PASTA_CONFIG = os.path.join(USER_HOME, '.themarr_manager')
+os.makedirs(PASTA_CONFIG, exist_ok=True) # Cria a pasta automaticamente se ela não existir
+
+CONFIG_FILE = os.path.join(PASTA_CONFIG, 'config.json')
 
 def normalizar_audio_ffmpeg(caminho_mp3, lufs_alvo):
     """
@@ -89,17 +97,25 @@ def normalizar_audio_ffmpeg(caminho_mp3, lufs_alvo):
 # FUNÇÕES DE MEMÓRIA (CONFIGURAÇÕES)
 # ==========================================
 def carregar_config():
-    padrao = {"lufs": "-24", "jelly_check": False, "jelly_url": "", "jelly_api": ""}
+    padrao = {
+        "lufs": "-24", 
+        "jelly_check": False, 
+        "jelly_url": "", 
+        "jelly_api": "",
+        "open_browser": True
+    }
+    
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 dados = json.load(f)
-                # Atualiza os padrões com o que existir no arquivo antigo
+                # Atualiza os padrões com o que existir no arquivo
                 for chave in dados:
-                    if chave in padrao:
+                    if chave in padrao: # Agora o open_browser vai passar nesse teste!
                         padrao[chave] = dados[chave]
         except Exception as e:
             print(f"Erro ao ler config: {e}")
+            
     return padrao
 
 def salvar_config(dados):
@@ -449,9 +465,26 @@ def injetar_metadados_mp3(caminho_mp3, caminho_imagem, titulo, album, genero):
 # =======================================================
 class Api:
     def selecionar_pasta(self):
-        resultado = janela.create_file_dialog(webview.FOLDER_DIALOG)
-        if resultado:
-            pasta = resultado[0]
+        try:
+            pasta = ""
+            # 1. Tenta abrir pelo PyWebView (Modo Desktop)
+            if len(webview.windows) > 0:
+                resultado = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+                if resultado:
+                    pasta = resultado[0]
+            else:
+                # 2. Fallback (Modo Server): Usa o Tkinter nativo para forçar a janela do Windows!
+                root = tk.Tk()
+                root.withdraw() # Esconde a janela principal cinza do Tkinter
+                root.attributes('-topmost', True) # Força a janela a pular por cima do Navegador
+                pasta = filedialog.askdirectory(title="Selecione o diretório de Mídia")
+                root.destroy()
+            
+            # Se o usuário fechou a janela sem selecionar nada
+            if not pasta:
+                return {"sucesso": False, "erro": "Nenhuma pasta selecionada."}
+                
+            # Varre as temporadas
             temporadas = []
             try:
                 for item in os.listdir(pasta):
@@ -459,25 +492,18 @@ class Api:
                         temporadas.append(item)
             except Exception as e:
                 print(f"Erro ao ler pasta: {e}")
+                
             return {"sucesso": True, "caminho": pasta, "temporadas": temporadas}
-        return {"sucesso": False}
+            
+        except Exception as e:
+            print(f"Erro fatal no Browse: {e}")
+            return {"sucesso": False, "erro": str(e)}
 
     def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo):
-        """
-        Varre as pastas procurando MP3. Se achar, aplica FFmpeg e injeta Metadados Jellyfin.
-        Se modo_batch for True, ele processa todas as subpastas.
-        """
         if not pasta_alvo or not os.path.exists(pasta_alvo):
             return {"status": "erro", "mensagem": "Invalid directory."}
             
         try:
-            # ==========================================================
-            # 1. LIGA O MICROFONE DOS LOGS (Limpa a fila e começa a gravar)
-            # ==========================================================
-            while not fila_logs.empty():
-                fila_logs.get()
-            sys.stdout.capturar = True 
-
             print("\n=======================================================")
             print("[ENHANCE] Iniciando processo de melhoria de áudio...")
             print(f"[ENHANCE] Modo Batch (Todas as subpastas): {'Sim' if modo_batch else 'Não'}")
@@ -517,7 +543,6 @@ class Api:
                     if normalizar_audio_ffmpeg(mp3, lufs_alvo):
                         arquivos_afetados += 1
                         
-                # Aplica as capas (essa função já tem os próprios prints!)
                 processar_capas_pasta_atual(pasta_anime, nome_anime, config_atual)
                 
             print("\n=======================================================")
@@ -532,44 +557,38 @@ class Api:
         except Exception as e:
             print(f"\n[ENHANCE] ❌ Erro crítico: {e}")
             return {"status": "erro", "mensagem": f"Error: {str(e)}"}
-            
-        finally:
-            # ==========================================================
-            # 2. DESLIGA O MICROFONE DOS LOGS
-            # Isso é vital para não ficar capturando lixo interno do Python depois
-            # ==========================================================
-            sys.stdout.capturar = False
 
     def apagar_musicas_pasta(self, pasta_raiz):
-        """
-        Varre a pasta principal e todas as subpastas procurando e apagando arquivos .mp3.
-        Também apaga as pastas 'theme-music' se elas ficarem vazias.
-        """
         if not pasta_raiz or not os.path.exists(pasta_raiz):
             return {"status": "erro", "mensagem": "Invalid or missing directory."}
         
         apagados = 0
         try:
-            # 1. Varre tudo de cima a baixo procurando .mp3
+            print(f"\n=======================================================")
+            print(f"[CLEANUP] Iniciando limpeza de áudios em: {pasta_raiz}")
+            print(f"=======================================================\n")
+            
             for raiz, subpastas, arquivos in os.walk(pasta_raiz):
                 for arquivo in arquivos:
                     if arquivo.lower().endswith('.mp3'):
                         caminho_completo = os.path.join(raiz, arquivo)
                         os.remove(caminho_completo)
+                        print(f"[CLEANUP] 🗑️ Removido: {arquivo}")
                         apagados += 1
             
-            # 2. Varre de baixo para cima tentando apagar pastas 'theme-music' vazias
             for raiz, subpastas, arquivos in os.walk(pasta_raiz, topdown=False):
                 for subpasta in subpastas:
                     if subpasta.lower() == 'theme-music':
                         caminho_sub = os.path.join(raiz, subpasta)
-                        # Verifica se a pasta está vazia
                         if not os.listdir(caminho_sub): 
                             os.rmdir(caminho_sub)
+                            print(f"[CLEANUP] 📁 Pasta vazia removida: {caminho_sub}")
                             
+            print(f"\n[CLEANUP] Concluído! {apagados} arquivo(s) removido(s).")
             return {"status": "sucesso", "mensagem": f"Cleaned up! {apagados} audio file(s) removed."}
             
         except Exception as e:
+            print(f"[CLEANUP] ❌ Erro: {e}")
             return {"status": "erro", "mensagem": f"Error during cleanup: {str(e)}"}
 
     def obter_status(self):
@@ -602,10 +621,6 @@ class Api:
 
     def _executar_fila_thread(self, lista_musicas, pasta_anime_raiz):
         global estado_global
-        
-        while not fila_logs.empty():
-            fila_logs.get()
-        sys.stdout.capturar = True 
 
         total = len(lista_musicas)
         print(f"\n[SISTEMA] Iniciando fila com {total} itens...\n")
@@ -680,21 +695,34 @@ class Api:
         estado_global["is_processing"] = False # Desliga a flag de processamento!
         
         print("\n[SISTEMA] Fila concluída com sucesso! Aguardando novos comandos...")
-        sys.stdout.capturar = False
 
 
     def testar_jellyfin(self, url, api_key):
         try:
-            headers = {"Authorization": f'MediaBrowser Token="{api_key}"'}
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            url = str(url).strip().strip('"').strip("'")
+            api_key = str(api_key).strip().strip('"').strip("'")
+            
+            if not url.startswith('http'):
+                url = 'http://' + url
             clean_url = url.rstrip('/')
-            resposta = requests.get(f"{clean_url}/System/Info", headers=headers, timeout=5)
+            
+            headers = {
+                "X-Emby-Token": api_key,
+                "Accept": "application/json"
+            }
+            
+            resposta = requests.get(f"{clean_url}/System/Info", headers=headers, timeout=5, verify=False)
+            
             if resposta.status_code == 200:
                 return {"status": "sucesso", "mensagem": "✅ Connected Successfully!"}
-            elif resposta.status_code == 401:
-                return {"status": "erro", "mensagem": "❌ Invalid API Key"}
-            return {"status": "erro", "mensagem": f"❌ Error code: {resposta.status_code}"}
-        except:
-            return {"status": "erro", "mensagem": "❌ Connection Failed"}
+            else:
+                return {"status": "erro", "mensagem": f"❌ Error {resposta.status_code}: API Key rejected by server."}
+                
+        except Exception as e:
+            return {"status": "erro", "mensagem": f"❌ Connection Error: {str(e)}"}
         
     def obter_configuracoes(self):
         return carregar_config()
@@ -748,33 +776,95 @@ def api_flask_processar_fila():
 def api_flask_status():
     return jsonify(api_sistema.obter_status())
 
+@app.route('/api/testar_jellyfin', methods=['POST'])
+def api_flask_testar_jellyfin():
+    try:
+        dados = request.get_json(force=True, silent=True) or {}
+        
+        url = dados.get('url', '')
+        # Agora o Flask é inteligente: procura por 'api_key', e se não achar, procura por 'api'
+        api_key = dados.get('api_key', dados.get('api', '')) 
+        
+        print(f"\n[RECEIVED FROM BROWSER] URL: {url} | API: {api_key}")
+        
+        resultado = api_sistema.testar_jellyfin(url, api_key)
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": f"❌ Flask Route Error: {str(e)}"})
+    
+@app.route('/api/apagar_musicas_pasta', methods=['POST'])
+def api_flask_apagar_musicas():
+    try:
+        dados = request.get_json(force=True, silent=True) or {}
+        pasta = dados.get('pasta', '')
+        
+        print(f"\n[RECEIVED FROM BROWSER] Delete files in: {pasta}")
+        
+        resultado = api_sistema.apagar_musicas_pasta(pasta)
+        return jsonify(resultado)
+        
+    except Exception as e:
+        print(f"[FLASK ERROR] Delete failed: {e}")
+        return jsonify({"status": "erro", "mensagem": f"❌ Server Error: {str(e)}"})
+
+
+@app.route('/api/melhorar_musicas_locais', methods=['POST'])
+def api_flask_melhorar_musicas():
+    try:
+        dados = request.get_json(force=True, silent=True) or {}
+        
+        # Puxando exatamente os nomes que o Javascript envia
+        pasta = dados.get('pasta', '')
+        modo_batch = dados.get('modoBatch', False)
+        lufs = dados.get('lufs', '-24')
+        
+        print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {pasta} | Batch: {modo_batch} | LUFS: {lufs}")
+        
+        resultado = api_sistema.melhorar_musicas_locais(pasta, modo_batch, lufs)
+        return jsonify(resultado)
+        
+    except Exception as e:
+        print(f"[FLASK ERROR] Enhance failed: {e}")
+        return jsonify({"status": "erro", "mensagem": f"❌ Server Error: {str(e)}"})
+
 # ========================================================
 
 def iniciar_servidor():
     app.run(host='127.0.0.1', port=5000, debug=False)
 
-if __name__ == '__main__':
-    # Redireciona saídas para capturarmos os logs na nossa rota
+def aplicativo_ja_esta_rodando():
+    """Tenta conectar na porta 5000. Se conseguir, é porque já tem uma instância do Themarr aberta."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # connect_ex retorna 0 se a conexão for bem sucedida (porta ocupada)
+        return s.connect_ex(('127.0.0.1', 5000)) == 0
+
+def iniciar_flask_background():
+    #CHECAGEM DE INSTÂNCIA DUPLA
+    if aplicativo_ja_esta_rodando():
+        print("Uma instância do Themarr já está rodando. Fechando esta nova tentativa...")
+        sys.exit(0)
+
+    # Redireciona saídas para capturarmos os logs na nossa rota web
     sys.stdout = RedirecionadorLog(sys.__stdout__)
     sys.stderr = sys.stdout
-
+    
     t = threading.Thread(target=iniciar_servidor)
     t.daemon = True
     t.start()
 
-    # === TESTE SUPREMO: JELLYFIN + MP3 (TEMPORÁRIO) ===
+if __name__ == '__main__':
     
-    # ==================================================
-
-    api = Api()
-
+    iniciar_flask_background()
+    
+    # Abre a janela clássica do PyWebView
     janela = webview.create_window(
-        'Themarr - Sonarr/Plex Theme Manager', 
-        'http://127.0.0.1:5000',
-        width=780, 
-        height=880,
-        background_color='#1e1e1e',
-        js_api=api
+        "Themarr Manager", 
+        "http://127.0.0.1:5000", 
+        js_api=api_sistema,
+        width=900, 
+        height=750, 
+        background_color='#1e1e1e'
     )
     
     webview.start()

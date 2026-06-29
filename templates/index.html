@@ -123,6 +123,10 @@ System ready. Awaiting tasks...
                     <input type="checkbox" id="jellyfinCheck" onchange="salvarConfigsAuto()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                     <span class="font-medium">Fetch Metadata from Jellyfin</span>
                 </label>
+                <label class="flex items-center gap-2 cursor-pointer mt-4 mb-2 pt-3 border-t border-neutral-700">
+                    <input type="checkbox" id="openBrowserCheck" onchange="salvarConfigsAuto()" checked class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                    <span class="font-medium text-neutral-300">Open browser automatically (Server Mode)</span>
+                </label>
                 <input type="text" id="jellyUrl" onchange="salvarConfigsAuto()" placeholder="Jellyfin URL (e.g., http://192.168.1.100:8096)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
                 <input type="password" id="jellyApi" onchange="salvarConfigsAuto()" placeholder="API Key" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
                 <p id="apiStatus" class="text-xs h-4"></p>
@@ -223,7 +227,7 @@ System ready. Awaiting tasks...
                             return await res.json();
                         },
                         testar_jellyfin: async (url, api) => {
-                            let res = await fetch('/api/testar_jellyfin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, api: api }) });
+                            let res = await fetch('/api/testar_jellyfin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, api_key: api }) });
                             return await res.json();
                         }
                     }
@@ -250,7 +254,7 @@ System ready. Awaiting tasks...
             const toastMsg = document.getElementById('toastMessage');
             const toastIcon = document.getElementById('toastIcon');
             
-            toastMsg.innerText = message = mensagem;
+            toastMsg.innerText = mensagem;
             toastIcon.innerText = status === 'sucesso' ? '✅' : '❌';
             
             toast.classList.remove('hidden');
@@ -653,15 +657,9 @@ System ready. Awaiting tasks...
             atualizarFilaUI();
         };
 
-        function testarConexao() {
+        async function testarConexao() {
             const msgEl = document.getElementById('testMsg');
             msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity";
-            
-            if(!window.pywebview) {
-                msgEl.innerText = "System is still loading, please wait...";
-                msgEl.classList.add("text-yellow-500");
-                return;
-            }
             
             const url = document.getElementById('jellyUrl').value.trim();
             const api = document.getElementById('jellyApi').value.trim();
@@ -675,7 +673,20 @@ System ready. Awaiting tasks...
             msgEl.innerText = "Testing connection...";
             msgEl.classList.add("text-neutral-400");
 
-            pywebview.api.testar_jellyfin(url, api).then(resposta => {
+            try {
+                let resposta;
+
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.testar_jellyfin) {
+                    resposta = await window.pywebview.api.testar_jellyfin(url, api);
+                } else {
+                    const requisicao = await fetch('/api/testar_jellyfin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url, api_key: api })
+                    });
+                    resposta = await requisicao.json();
+                }
+
                 msgEl.classList.remove("text-neutral-400");
                 msgEl.innerText = resposta.mensagem;
                 if(resposta.status === 'sucesso') {
@@ -683,31 +694,77 @@ System ready. Awaiting tasks...
                 } else {
                     msgEl.classList.add("text-red-500");
                 }
-            }).catch(erro => {
+            } catch (erro) {
                 msgEl.classList.remove("text-neutral-400");
                 msgEl.innerText = "❌ Connection failed. Check if the URL is correct and the server is online.";
                 msgEl.classList.add("text-red-500");
-            });
+                console.error("Erro no teste de conexão:", erro);
+            }
         }
 
-        window.addEventListener('pywebviewready', function() {
-            pywebview.api.obter_configuracoes().then(config => {
-                document.getElementById('lufsInput').value = config.lufs;
-                document.getElementById('jellyfinCheck').checked = config.jelly_check;
-                document.getElementById('jellyUrl').value = config.jelly_url;
-                document.getElementById('jellyApi').value = config.jelly_api;
-            });
+        // 2. CARREGAMENTO HÍBRIDO DE CONFIGURAÇÕES
+        async function carregarConfiguracoes() {
+            try {
+                let config;
+                if (window.pywebview && window.pywebview.api) {
+                    config = await pywebview.api.obter_configuracoes();
+                } else {
+                    const res = await fetch('/api/obter_configuracoes');
+                    config = await res.json();
+                }
+                
+                if(config) {
+                    document.getElementById('lufsInput').value = config.lufs;
+                    document.getElementById('jellyfinCheck').checked = config.jelly_check;
+                    document.getElementById('jellyUrl').value = config.jelly_url;
+                    document.getElementById('jellyApi').value = config.jelly_api;
+
+                    if(config.open_browser !== undefined) {
+                        document.getElementById('openBrowserCheck').checked = config.open_browser;
+                    } else {
+                        document.getElementById('openBrowserCheck').checked = true;
+                    }
+                }
+            } catch (error) {
+                console.error("Erro ao carregar configurações:", error);
+            }
+        }
+
+        // Ativa o carregamento no Navegador
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!window.pywebview) {
+                carregarConfiguracoes();
+            }
         });
 
-        function salvarConfigsAuto() {
-            if(!window.pywebview) return;
+        // Ativa o carregamento no Desktop
+        window.addEventListener('pywebviewready', function() {
+            carregarConfiguracoes();
+        });
+
+        // 3. SALVAMENTO HÍBRIDO (Sem travas)
+        async function salvarConfigsAuto() {
             const dados = {
                 lufs: document.getElementById('lufsInput').value,
                 jelly_check: document.getElementById('jellyfinCheck').checked,
                 jelly_url: document.getElementById('jellyUrl').value,
-                jelly_api: document.getElementById('jellyApi').value
+                jelly_api: document.getElementById('jellyApi').value,
+                open_browser: document.getElementById('openBrowserCheck').checked
             };
-            pywebview.api.salvar_configuracoes(dados);
+
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    pywebview.api.salvar_configuracoes(dados);
+                } else {
+                    await fetch('/api/salvar_configuracoes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(dados)
+                    });
+                }
+            } catch (error) {
+                console.error("Erro ao salvar configurações automaticamente:", error);
+            }
         }
     </script>
 </body>

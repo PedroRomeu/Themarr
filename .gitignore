@@ -7,6 +7,11 @@ venv/
 # Configurações locais (Segurança!)
 config.json
 
-# Binários pesados (Fffmpeg)
+# Binários pesados (Ffmpeg)
 bin/
 *.exe
+
+# Builds e compilados (PyInstaller)
+build/
+dist/
+*.spec
