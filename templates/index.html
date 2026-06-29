@@ -141,19 +141,24 @@ System ready. Awaiting tasks...
     </div>
 
     <div id="deleteModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 transition-opacity backdrop-blur-sm">
-        <div class="bg-neutral-800 border border-neutral-700 rounded-md p-5 max-w-xs w-full shadow-xl">
+        <div class="bg-neutral-800 border border-neutral-700 rounded-md p-5 max-w-sm w-full shadow-xl">
             <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                ⚠️ Warning
+                ⚠️ Clear Audio Files
             </h2>
             <p class="text-xs text-neutral-400 mb-5 leading-relaxed">
-                Are you sure you want to delete all .mp3 files inside this directory? This action cannot be undone.
+                Choose the scope of the deletion. This action will permanently remove .mp3 files.
             </p>
-            <div class="flex justify-end gap-2 text-xs">
-                <button onclick="fecharModalApagar()" class="text-neutral-400 hover:text-neutral-200 px-3 py-1.5 rounded transition-colors">
-                    Cancel
+            <div class="flex flex-col gap-2 text-xs">
+                <button onclick="confirmarApagar(false)" class="bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
+                    <span><strong>1. Current Media Only</strong></span>
+                    <span class="text-neutral-500">Selected folder</span>
                 </button>
-                <button onclick="confirmarApagar()" class="bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 text-red-200 px-3 py-1.5 rounded transition-colors font-medium">
-                    Delete All
+                <button onclick="confirmarApagar(true)" class="bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 text-red-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
+                    <span><strong>2. Batch Mode (ALL MEDIAS)</strong></span>
+                    <span class="opacity-70">Entire Library</span>
+                </button>
+                <button onclick="fecharModalApagar()" class="text-neutral-400 hover:text-neutral-200 px-3 py-2 mt-2 text-center rounded transition-colors">
+                    Cancel
                 </button>
             </div>
         </div>
@@ -218,8 +223,12 @@ System ready. Awaiting tasks...
                             let res = await fetch('/api/status');
                             return await res.json();
                         },
-                        apagar_musicas_pasta: async (pasta) => {
-                            let res = await fetch('/api/apagar_musicas_pasta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pasta: pasta }) });
+                        apagar_musicas_pasta: async (pasta, modoBatch) => {
+                            let res = await fetch('/api/apagar_musicas_pasta', { 
+                                method: 'POST', 
+                                headers: { 'Content-Type': 'application/json' }, 
+                                body: JSON.stringify({ pasta: pasta, modoBatch: modoBatch }) 
+                            });
                             return await res.json();
                         },
                         melhorar_musicas_locais: async (pasta, modoBatch, lufs) => {
@@ -239,7 +248,8 @@ System ready. Awaiting tasks...
         function abrirModalApagar() {
             const pasta = document.getElementById('pastaPath').innerText; 
             if (pasta === "No folder selected..." || pasta.trim() === "") {
-                alert("Please select a Media Directory first!");
+                // AQUI ESTAVA O ALERT FEIO. AGORA USA O TOAST BONITO!
+                mostrarToast("Please select a Media Directory first!", "erro");
                 return;
             }
             document.getElementById('deleteModal').classList.remove('hidden');
@@ -268,11 +278,34 @@ System ready. Awaiting tasks...
             }, 3500);
         }
 
-        function confirmarApagar() {
+        function confirmarApagar(modoBatch) {
+            // DOUBLE CHECK DE SEGURANÇA (Agora usando "Media" de forma genérica)
+            if (modoBatch) {
+                let doubleCheck = confirm(
+                    "⚠️ DOUBLE CHECK WARNING ⚠️\n\n" +
+                    "You are about to permanently delete ALL audio files from ALL MEDIA in the library.\n" +
+                    "Are you absolutely sure you want to proceed?"
+                );
+                if (!doubleCheck) {
+                    fecharModalApagar();
+                    return; 
+                }
+            } else {
+                let singleCheck = confirm("Proceed with deleting audio files from the CURRENT MEDIA only?");
+                if (!singleCheck) {
+                    fecharModalApagar();
+                    return;
+                }
+            }
+
+            // Se passou pelos checks, fecha o modal e manda o comando
             fecharModalApagar();
             const pasta = document.getElementById('pastaPath').innerText;
+            mostrarToast("🗑️ Deleting files...", "sucesso");
+
             if(window.pywebview) {
-                pywebview.api.apagar_musicas_pasta(pasta).then(res => {
+                // Envia a pasta e a escolha (modoBatch: true ou false) para o Python
+                pywebview.api.apagar_musicas_pasta(pasta, modoBatch).then(res => {
                     mostrarToast(res.mensagem, res.status);
                 });
             }

@@ -518,10 +518,62 @@ class Api:
         except Exception as e:
             print(f"Erro fatal no Browse: {e}")
             return {"sucesso": False, "erro": str(e)}
+        
+    def _resolver_pastas_inteligentes(self, pasta, modo_batch):
+        if not pasta: return pasta
+        
+        pasta_atual = os.path.normpath(pasta)
+        
+        # 1. Encontrar a "Mãe" (O Anime exato, ex: Akame Ga Kill)
+        # Sobe se o utilizador clicou sem querer numa subpasta (theme-music, Season...)
+        for _ in range(3):
+            nome = os.path.basename(pasta_atual).lower()
+            if "season" in nome or "theme" in nome or "main" in nome:
+                pasta_atual = os.path.dirname(pasta_atual)
+            else:
+                break
+                
+        pasta_anime = pasta_atual
+        
+        if not modo_batch:
+            # MODO THIS (Só este anime): Retorna a "Mãe"
+            return pasta_anime
+        else:
+            # MODO ALL (Todos os animes): Precisamos da "Avó" (ex: Animes)
+            
+            # PROTEÇÃO MÁXIMA: E se o utilizador já tiver selecionado a pasta "Animes" direto?
+            # Vamos olhar para dentro da pasta. Se ela tiver arquivos de vídeo ou uma pasta "theme-music",
+            # significa que ela é um Anime! Então podemos subir para a Avó em segurança.
+            e_anime = False
+            try:
+                for item in os.listdir(pasta_anime):
+                    item_min = item.lower()
+                    if item_min == "theme-music" or item_min.startswith("season"):
+                        e_anime = True
+                        break
+                    # Se tiver ficheiros de vídeo/áudio na raiz, também é anime
+                    if os.path.isfile(os.path.join(pasta_anime, item)) and item_min.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
+                        e_anime = True
+                        break
+            except:
+                pass
+                
+            if e_anime:
+                pasta_avo = os.path.dirname(pasta_anime)
+                # Proteção: Não sobe se a avó for a raiz do disco (ex: C:\)
+                if os.path.ismount(pasta_avo) or len(pasta_avo) <= 3:
+                    return pasta_anime
+                return pasta_avo
+            else:
+                # Se não encontrou características de anime, assumimos que já estamos na pasta Avó ("Animes")
+                return pasta_anime
 
     def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo):
         if not pasta_alvo or not os.path.exists(pasta_alvo):
             return {"status": "erro", "mensagem": "Invalid directory."}
+        
+        if modo_batch:
+            pasta_alvo = self._resolver_pastas_inteligentes(pasta_alvo, modo_batch)
             
         try:
             print("\n=======================================================")
@@ -578,17 +630,22 @@ class Api:
             print(f"\n[ENHANCE] ❌ Erro crítico: {e}")
             return {"status": "erro", "mensagem": f"Error: {str(e)}"}
 
-    def apagar_musicas_pasta(self, pasta_raiz):
+    def apagar_musicas_pasta(self, pasta_raiz, modo_batch=False):
         if not pasta_raiz or not os.path.exists(pasta_raiz):
             return {"status": "erro", "mensagem": "Invalid or missing directory."}
+        
+        # Aplica a inteligência da Mãe/Avó
+        pasta_alvo = self._resolver_pastas_inteligentes(pasta_raiz, modo_batch)
         
         apagados = 0
         try:
             print(f"\n=======================================================")
-            print(f"[CLEANUP] Iniciando limpeza de áudios em: {pasta_raiz}")
+            print(f"[CLEANUP] Iniciando limpeza de áudios em: {pasta_alvo}")
+            print(f"[CLEANUP] Modo: {'ALL ANIMES (Avó)' if modo_batch else 'CURRENT ANIME (Mãe)'}")
             print(f"=======================================================\n")
             
-            for raiz, subpastas, arquivos in os.walk(pasta_raiz):
+            # Varre tudo a partir da pasta alvo definida pela inteligência
+            for raiz, subpastas, arquivos in os.walk(pasta_alvo):
                 for arquivo in arquivos:
                     if arquivo.lower().endswith('.mp3'):
                         caminho_completo = os.path.join(raiz, arquivo)
@@ -596,13 +653,13 @@ class Api:
                         print(f"[CLEANUP] 🗑️ Removido: {arquivo}")
                         apagados += 1
             
-            for raiz, subpastas, arquivos in os.walk(pasta_raiz, topdown=False):
+            # Limpa pastas "theme-music" que tenham ficado vazias
+            for raiz, subpastas, arquivos in os.walk(pasta_alvo, topdown=False):
                 for subpasta in subpastas:
                     if subpasta.lower() == 'theme-music':
                         caminho_sub = os.path.join(raiz, subpasta)
                         if not os.listdir(caminho_sub): 
                             os.rmdir(caminho_sub)
-                            print(f"[CLEANUP] 📁 Pasta vazia removida: {caminho_sub}")
                             
             print(f"\n[CLEANUP] Concluído! {apagados} arquivo(s) removido(s).")
             return {"status": "sucesso", "mensagem": f"Cleaned up! {apagados} audio file(s) removed."}
@@ -643,6 +700,13 @@ class Api:
         global estado_global
 
         total = len(lista_musicas)
+
+        estado_global["itens_status"] = ["aguardando"] * total 
+        estado_global["porcentagem"] = 0
+        estado_global["is_processing"] = True
+        estado_global["textoStatus"] = "Starting process..."
+        estado_global["textoPorcentagem"] = f"0/{total} (0%)"
+
         print(f"\n[SISTEMA] Iniciando fila com {total} itens...\n")
 
         qtd_main = sum(1 for m in lista_musicas if m['destino'] == 'Main Theme')
@@ -823,10 +887,11 @@ def api_flask_apagar_musicas():
     try:
         dados = request.get_json(force=True, silent=True) or {}
         pasta = dados.get('pasta', '')
+        modo_batch = dados.get('modoBatch', False) # Agora recebe a escolha do utilizador
         
-        print(f"\n[RECEIVED FROM BROWSER] Delete files in: {pasta}")
+        print(f"\n[RECEIVED FROM BROWSER] Delete files in: {pasta} | Batch: {modo_batch}")
         
-        resultado = api_sistema.apagar_musicas_pasta(pasta)
+        resultado = api_sistema.apagar_musicas_pasta(pasta, modo_batch)
         return jsonify(resultado)
         
     except Exception as e:
