@@ -1,113 +1,77 @@
-import webview
-from flask import Flask, render_template, jsonify, request
-import threading
-import sys
 import os
-import yt_dlp
-import subprocess
-import shutil
+import sys
 import json
 import queue
-import requests
+import socket
 import logging
 import re
 import tempfile
+import threading
 import subprocess
 import shutil
-import socket
 import tkinter as tk
 from tkinter import filedialog
+import requests
+import yt_dlp
+import webview
+from flask import Flask, render_template, jsonify, request
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC, error, TIT2, TALB, TCON
 
-def obter_caminho_base():
+# ==========================================
+# PATH CONFIGURATIONS & GLOBALS
+# ==========================================
+def get_base_path():
     if getattr(sys, 'frozen', False):
-        # Se estiver rodando como .exe (compilado pelo PyInstaller)
+        # Running as .exe (compiled by PyInstaller)
         return os.path.dirname(sys.executable)
-    else:
-        # Se estiver rodando como script no VS Code
-        return os.path.dirname(os.path.abspath(__file__))
+    # Running as script
+    return os.path.dirname(os.path.abspath(__file__))
     
-PASTA_RAIZ_APP = obter_caminho_base()
+APP_ROOT_DIR = get_base_path()
+FFMPEG_PATH = os.path.join(APP_ROOT_DIR, 'bin', 'ffmpeg.exe')
 
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR) # Manda o Flask silenciar as mensagens de "GET /api/logs"
+# User profile config folder
+USER_HOME = os.path.expanduser('~')
+CONFIG_FOLDER = os.path.join(USER_HOME, '.themarr_manager')
+os.makedirs(CONFIG_FOLDER, exist_ok=True) 
 
-# Inicia o servidor Flask (Backend)
+CONFIG_FILE = os.path.join(CONFIG_FOLDER, 'config.json')
+
+# Initialize Flask
 app = Flask(__name__)
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR) # Mute default Flask logs
 
-# --- 1. REINTEGRANDO SEU MOTOR DE LOGS ANTIGO ---
-fila_logs = queue.Queue()
+# ==========================================
+# LOGGING ENGINE
+# ==========================================
+log_queue = queue.Queue()
 
-class RedirecionadorLog:
-    def __init__(self, terminal_original):
-        self.terminal = terminal_original
-        self.capturar = True # <-- AGORA FICA LIGADO DESDE O INÍCIO!
+class LogRedirector:
+    def __init__(self, original_terminal):
+        self.terminal = original_terminal
+        self.capture = True
 
-    def write(self, texto):
+    def write(self, text):
         if self.terminal:
-            self.terminal.write(texto)
+            self.terminal.write(text)
             self.terminal.flush()
         
-        if self.capturar:
-            texto_limpo = texto.replace('\r', '\n')
-            if texto_limpo:
-                fila_logs.put(texto_limpo)
+        if self.capture:
+            clean_text = text.replace('\r', '\n')
+            if clean_text:
+                log_queue.put(clean_text)
 
     def flush(self):
         if self.terminal:
             self.terminal.flush()
 
-# --- 2. REINTEGRANDO CONFIGURAÇÕES E CAMINHOS ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FFMPEG_PATH = os.path.join(PASTA_RAIZ_APP, 'bin', 'ffmpeg.exe')
-
-# NOVA LÓGICA: Salva o config na pasta de perfil do usuário logado no Windows
-USER_HOME = os.path.expanduser('~')
-PASTA_CONFIG = os.path.join(USER_HOME, '.themarr_manager')
-os.makedirs(PASTA_CONFIG, exist_ok=True) # Cria a pasta automaticamente se ela não existir
-
-CONFIG_FILE = os.path.join(PASTA_CONFIG, 'config.json')
-
-def normalizar_audio_ffmpeg(caminho_mp3, lufs_alvo):
-    """
-    Roda o FFmpeg para normalizar o áudio, imitando a lógica segura do seu arquivo .bat antigo.
-    """
-    arquivo_temp = caminho_mp3 + ".temp.mp3"
-    
-    # A CORREÇÃO FOI AQUI: Substituímos "ffmpeg" por FFMPEG_PATH
-    comando = [
-        FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-y",
-        "-i", caminho_mp3,
-        "-filter:a", f"loudnorm=I={lufs_alvo}:LRA=11:TP=-1.0",
-        "-b:a", "320k",
-        arquivo_temp
-    ]
-    
-    try:
-        # Executa sem abrir janelas pretas (startupinfo protege isso no Windows)
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        
-        subprocess.run(comando, check=True, startupinfo=startupinfo)
-        
-        # Verifica se deu certo e se o arquivo não está vazio (como no seu .bat)
-        if os.path.exists(arquivo_temp) and os.path.getsize(arquivo_temp) > 0:
-            shutil.move(arquivo_temp, caminho_mp3) # Substitui silenciosamente
-            return True
-        else:
-            if os.path.exists(arquivo_temp):
-                os.remove(arquivo_temp)
-            return False
-    except Exception as e:
-        print(f"[FFMPEG] ❌ Erro ao normalizar {caminho_mp3}: {e}")
-        if os.path.exists(arquivo_temp):
-            os.remove(arquivo_temp)
-        return False
-
 # ==========================================
-# FUNÇÕES DE MEMÓRIA (CONFIGURAÇÕES)
+# SETTINGS MANAGER
 # ==========================================
-def carregar_config():
-    padrao = {
+def load_config():
+    default_config = {
         "lufs": "-24", 
         "jelly_check": False, 
         "jelly_url": "", 
@@ -118,213 +82,167 @@ def carregar_config():
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                dados = json.load(f)
-                # Atualiza os padrões com o que existir no arquivo
-                for chave in dados:
-                    if chave in padrao: # Agora o open_browser vai passar nesse teste!
-                        padrao[chave] = dados[chave]
+                data = json.load(f)
+                for key in data:
+                    if key in default_config:
+                        default_config[key] = data[key]
         except Exception as e:
-            print(f"Erro ao ler config: {e}")
+            print(f"[CONFIG] Error loading settings: {e}")
             
-    return padrao
+    return default_config
 
-def salvar_config(dados):
+def save_config(data):
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(dados, f, indent=4)
+            json.dump(data, f, indent=4)
     except Exception as e:
-        print(f"Erro ao salvar config: {e}")
+        print(f"[CONFIG] Error saving settings: {e}")
 
-# --- 3. REINTEGRANDO SUAS FUNÇÕES DE DOWNLOAD E CONVERSÃO ---
-def baixar_musica(url_youtube):
-    print(f"\n[1] Iniciando o download: {url_youtube}")
+# ==========================================
+# CORE UTILITIES (FFMPEG & FILE MANAGEMENT)
+# ==========================================
+def normalize_audio_ffmpeg(mp3_path, target_lufs):
+    """
+    Runs FFmpeg to normalize audio, imitating the safe logic from the old .bat file.
+    """
+    temp_file = mp3_path + ".temp.mp3"
     
-    # MÁGICA 1: Pega a pasta secreta temporária do Windows para não sujar o sistema
-    pasta_temp_so = tempfile.gettempdir() 
+    command = [
+        FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", mp3_path,
+        "-filter:a", f"loudnorm=I={target_lufs}:LRA=11:TP=-1.0",
+        "-b:a", "320k",
+        temp_file
+    ]
     
-    configuracoes = {
+    try:
+        # Run without opening black command windows
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+        subprocess.run(command, check=True, startupinfo=startupinfo)
+        
+        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+            shutil.move(temp_file, mp3_path)
+            return True
+        else:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            return False
+    except Exception as e:
+        print(f"[FFMPEG] ❌ Error normalizing {mp3_path}: {e}")
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        return False
+
+def download_music(youtube_url):
+    print(f"\n[DOWNLOAD] Starting download: {youtube_url}")
+    
+    os_temp_folder = tempfile.gettempdir() 
+    
+    options = {
         'format': 'bestaudio/best',
         'ffmpeg_location': FFMPEG_PATH,
         'extractor_args': {'youtube': {'client': ['android']}},
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
-        # MÁGICA 2: Manda o yt-dlp salvar o arquivo lá!
-        'outtmpl': os.path.join(pasta_temp_so, '%(title)s.%(ext)s'),
+        'outtmpl': os.path.join(os_temp_folder, '%(title)s.%(ext)s'),
         'nocolor': True,
     }
-    with yt_dlp.YoutubeDL(configuracoes) as ydl:
-        info = ydl.extract_info(url_youtube, download=True)
-        nome_arquivo_base = ydl.prepare_filename(info)
-        arquivo_mp3 = os.path.splitext(nome_arquivo_base)[0] + '.mp3'
-    return arquivo_mp3
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(youtube_url, download=True)
+        base_filename = ydl.prepare_filename(info)
+        mp3_file = os.path.splitext(base_filename)[0] + '.mp3'
+    return mp3_file
 
-def gerar_caminho_destino(pasta_anime, tipo_tema, nome_customizado, pasta_temporada=None, multiplos_main=False):
-    if not nome_customizado.endswith('.mp3'):
-        nome_customizado += '.mp3'
-    if tipo_tema == 'temporada':
-        pasta_final = os.path.join(pasta_anime, pasta_temporada, 'theme-music')
-        arquivo_final = os.path.join(pasta_final, nome_customizado)
-    elif tipo_tema == 'main':
-        if not multiplos_main:
-            pasta_final = pasta_anime
-            arquivo_final = os.path.join(pasta_final, 'theme.mp3')
+def generate_destination_path(anime_folder, theme_type, custom_name, season_folder=None, multiple_main=False):
+    if not custom_name.endswith('.mp3'):
+        custom_name += '.mp3'
+        
+    if theme_type == 'temporada' or theme_type == 'season':
+        final_folder = os.path.join(anime_folder, season_folder, 'theme-music')
+        final_file = os.path.join(final_folder, custom_name)
+    elif theme_type == 'main':
+        theme_music_folder = os.path.join(anime_folder, 'theme-music')
+        loose_theme_file = os.path.join(anime_folder, 'theme.mp3')
+        
+        # CASO 1: É múltiplo na fila de agora OU a pasta 'theme-music' já existe no disco
+        if multiple_main or os.path.isdir(theme_music_folder):
+            final_folder = theme_music_folder
+            final_file = os.path.join(final_folder, custom_name)
+            
+        # CASO 2: A pasta não existe, mas existe um ficheiro 'theme.mp3' solto de um download anterior
+        elif os.path.exists(loose_theme_file):
+            os.makedirs(theme_music_folder, exist_ok=True)
+            # Arrasta o ficheiro solto antigo para a nova pasta 'theme-music'
+            shutil.move(loose_theme_file, os.path.join(theme_music_folder, 'theme.mp3'))
+            print("[SYSTEM] Migrated existing 'theme.mp3' to 'theme-music' folder to support multiple themes.")
+            
+            # Configura a nova música para ir para a pasta criada
+            final_folder = theme_music_folder
+            final_file = os.path.join(final_folder, custom_name)
+            
+        # CASO 3: É a primeira vez (sem pasta e sem ficheiro solto) e só há uma música na fila
         else:
-            pasta_final = os.path.join(pasta_anime, 'theme-music')
-            arquivo_final = os.path.join(pasta_final, nome_customizado)
+            final_folder = anime_folder
+            final_file = os.path.join(final_folder, 'theme.mp3')
     else:
-        raise ValueError("O tipo_tema deve ser 'main' ou 'temporada'.")
+        raise ValueError("Theme type must be 'main' or 'season'.")
 
-    if not os.path.exists(pasta_final):
-        os.makedirs(pasta_final)
-    return arquivo_final
+    # Garante que a pasta final (qualquer que seja a decisão acima) seja criada
+    os.makedirs(final_folder, exist_ok=True)
+    return final_file
 
-def normalizar_e_salvar(arquivo_entrada, caminho_saida_completo, volume_lufs):
-    print(f"\n[2] Normalizando (Target: {volume_lufs} LUFS) em: {caminho_saida_completo}")
-    comando = [
+def normalize_and_save(input_file, full_output_path, target_lufs):
+    print(f"\n[AUDIO] Normalizing (Target: {target_lufs} LUFS) -> {full_output_path}")
+    command = [
         FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-        '-i', arquivo_entrada, '-filter:a', f'loudnorm=I={volume_lufs}:LRA=11:TP=-1.0', '-b:a', '320k',
-        caminho_saida_completo
+        '-i', input_file, '-filter:a', f'loudnorm=I={target_lufs}:LRA=11:TP=-1.0', '-b:a', '320k',
+        full_output_path
     ]
     
-    # A CORREÇÃO DE OURO: Esconde a janela do FFmpeg para não dar crash no .exe
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     
-    subprocess.run(comando, check=True, startupinfo=startupinfo)
-    print("Sucesso! Arquivo pronto e no lugar certo.")
+    subprocess.run(command, check=True, startupinfo=startupinfo)
+    print("[AUDIO] Success! File is ready.")
 
-def mover_episodios_soltos(pasta_raiz, pasta_temporada):
-    extensoes_media = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
-    caminho_temp = os.path.join(pasta_raiz, pasta_temporada)
-    if not os.path.exists(caminho_temp):
-        os.makedirs(caminho_temp)
-    arquivos_movidos = 0
-    for arquivo in os.listdir(pasta_raiz):
-        caminho_arquivo = os.path.join(pasta_raiz, arquivo)
-        if os.path.isfile(caminho_arquivo) and arquivo.lower().endswith(extensoes_media):
-            caminho_novo = os.path.join(caminho_temp, arquivo)
-            shutil.move(caminho_arquivo, caminho_novo)
-            arquivos_movidos += 1
-    if arquivos_movidos > 0:
-        print(f"\n[!] Faxina Inteligente: {arquivos_movidos} arquivo(s) de mídia movidos!")
-
+def move_loose_episodes(root_folder, season_folder):
+    media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
+    temp_path = os.path.join(root_folder, season_folder)
+    os.makedirs(temp_path, exist_ok=True)
+    
+    moved_files = 0
+    for item in os.listdir(root_folder):
+        item_path = os.path.join(root_folder, item)
+        if os.path.isfile(item_path) and item.lower().endswith(media_extensions):
+            new_path = os.path.join(temp_path, item)
+            shutil.move(item_path, new_path)
+            moved_files += 1
+            
+    if moved_files > 0:
+        print(f"\n[CLEANUP] Smart Organize: {moved_files} media file(s) moved!")
 
 # =======================================================
-# ROTAS DO FLASK (COMO O FRONTEND VAI ACESSAR O BACKEND)
+# JELLYFIN & METADATA
 # =======================================================
-
-@app.route('/')
-def home():
-    return render_template('index.html')
-
-# Nova rota para enviar os logs do terminal em tempo real para o HTML
-@app.route('/api/logs')
-def obter_logs():
-    logs = []
-    try:
-        while not fila_logs.empty():
-            logs.append(fila_logs.get_nowait())
-    except queue.Empty:
-        pass
-    return jsonify({"logs": "".join(logs)})
-
-def processar_capas_pasta_atual(caminho_pasta_anime, nome_pasta_anime, config):
-    print(f"\n[AUTOMAÇÃO] 🎬 Iniciando processamento de metadados para: {nome_pasta_anime}")
+def clean_search_name(folder_name, remove_year=False):
+    clean_name = folder_name.replace('：', ' ').replace('-', ' ')
     
-    nomes_capas_locais = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
-    caminho_imagem_final = None
-    imagem_temporaria = False 
-    
-    # Valores padrão caso o Jellyfin esteja desligado
-    genero_final = "" 
-    nome_album_final = nome_pasta_anime 
-
-    # PRIORIDADE 2 - Imagem local
-    for nome_arquivo in nomes_capas_locais:
-        caminho_teste = os.path.join(caminho_pasta_anime, nome_arquivo)
-        if os.path.exists(caminho_teste):
-            print(f"[AUTOMAÇÃO] 🔍 Prioridade 2 Ativada: Imagem local encontrada ({nome_arquivo})")
-            caminho_imagem_final = caminho_teste
-            break
-
-    # BUSCA DE DADOS NO JELLYFIN (Para Gênero, Nome Limpo e Capa se faltar)
-    url_jelly = config.get("jelly_url")
-    api_jelly = config.get("jelly_api")
-    
-    if url_jelly and api_jelly:
-        print("[AUTOMAÇÃO] 🌐 Consultando Jellyfin para metadados adicionais...")
-        resultado_busca = buscar_dados_jellyfin(nome_pasta_anime, url_jelly, api_jelly)
-        
-        if resultado_busca["sucesso"]:
-            # MÁGICA 1: Pega o gênero real que o Jellyfin retornou!
-            genero_final = resultado_busca["generos"]
-            
-            # MÁGICA 2: Usa o nome OFICIAL do anime sem o ano para o álbum (ex: "86: Eighty-Six")
-            nome_album_final = resultado_busca["nome_oficial"]
-            
-            if genero_final:
-                print(f"[AUTOMAÇÃO] 🏷️ Gêneros encontrados: {genero_final}")
-            
-            # PRIORIDADE 1 - Baixa a capa só se não achou localmente
-            if not caminho_imagem_final and resultado_busca["url_imagem"]:
-                pasta_temp = tempfile.gettempdir()
-                nome_arquivo_temp = f"temp_cover_{resultado_busca['serie_id']}.jpg"
-                
-                caminho_imagem_final = baixar_imagem_jellyfin(
-                    url_imagem=resultado_busca["url_imagem"],
-                    api_key=api_jelly,
-                    pasta_destino=pasta_temp,
-                    nome_arquivo=nome_arquivo_temp
-                )
-                imagem_temporaria = True
+    if remove_year:
+        clean_name = re.sub(r'\(.*?\)|\[.*?\]|\{.*?\}', '', clean_name)
     else:
-        print("[AUTOMAÇÃO] ⚠️ Jellyfin não configurado/desmarcado. Pulando busca online.")
+        clean_name = re.sub(r'\[.*?\]|\{.*?\}', '', clean_name)
+    
+    clean_name = re.sub(r'\s+', ' ', clean_name)
+    return clean_name.strip()
 
-    # APLICAR METADADOS NOS MP3
-    print("[AUTOMAÇÃO] 🚀 Varrendo a pasta para aplicar metadados nos arquivos MP3...")
-    mp3_encontrados = 0
-    
-    for raiz, subpastas, arquivos in os.walk(caminho_pasta_anime):
-        for arquivo in arquivos:
-            if arquivo.lower().endswith('.mp3'):
-                caminho_completo_mp3 = os.path.join(raiz, arquivo)
-                titulo_musica = os.path.splitext(arquivo)[0]
-                
-                # Injeta os dados limpos!
-                if injetar_metadados_mp3(caminho_completo_mp3, caminho_imagem_final, titulo_musica, nome_album_final, genero_final):
-                    mp3_encontrados += 1
-                    
-    print(f"[AUTOMAÇÃO] ✨ Concluído! Metadados aplicados em {mp3_encontrados} arquivo(s) MP3.")
-    
-    # FAXINA TEMPORÁRIA
-    if imagem_temporaria and caminho_imagem_final:
-        try:
-            os.remove(caminho_imagem_final)
-            print("[AUTOMAÇÃO] 🧹 Arquivo de imagem temporário apagado com sucesso. Pasta limpa!")
-        except Exception as e:
-            print(f"[AUTOMAÇÃO] ⚠️ Não foi possível apagar a imagem temporária: {e}")
-
-def limpar_nome_pesquisa(nome_pasta, remover_ano=False):
-    # Troca caracteres problemáticos (como o dois pontos japonês e traços) por espaços
-    nome_limpo = nome_pasta.replace('：', ' ').replace('-', ' ')
-    
-    if remover_ano:
-        # Modo Sobrevivência: Arranca tudo dentro de (), [] e {}
-        nome_limpo = re.sub(r'\(.*?\)|\[.*?\]|\{.*?\}', '', nome_limpo)
-    else:
-        # Modo Preciso: Arranca apenas [] e {}, MANTENDO o (Ano)
-        nome_limpo = re.sub(r'\[.*?\]|\{.*?\}', '', nome_limpo)
-    
-    # Remove espaços duplos
-    nome_limpo = re.sub(r'\s+', ' ', nome_limpo)
-    return nome_limpo.strip()
-
-def buscar_dados_jellyfin(nome_pasta, url_jellyfin, api_key):
-    clean_url = url_jellyfin.rstrip('/')
+def fetch_jellyfin_data(folder_name, jellyfin_url, api_key):
+    clean_url = jellyfin_url.rstrip('/')
     headers = {"X-Emby-Token": api_key} 
 
-    def tentar_buscar(termo):
+    def try_search(term):
         params = {
-            "searchTerm": termo,
+            "searchTerm": term,
             "IncludeItemTypes": "Series",
             "Recursive": "true",
             "Fields": "Genres"
@@ -332,136 +250,104 @@ def buscar_dados_jellyfin(nome_pasta, url_jellyfin, api_key):
         try:
             res = requests.get(f"{clean_url}/Items", headers=headers, params=params, timeout=10)
             if res.status_code == 200:
-                dados = res.json()
-                if dados.get("Items") and len(dados["Items"]) > 0:
-                    serie = dados["Items"][0]
+                data = res.json()
+                if data.get("Items") and len(data["Items"]) > 0:
+                    series = data["Items"][0]
                     
-                    # ==================================================
-                    # A MUDANÇA FOI FEITA AQUI:
-                    # Capturamos a lista de gêneros e juntamos com vírgula
-                    # ==================================================
-                    generos_lista = serie.get("Genres", [])
-                    generos_string = ", ".join(generos_lista) if generos_lista else ""
+                    genres_list = series.get("Genres", [])
+                    genres_string = ", ".join(genres_list) if genres_list else ""
 
                     return {
-                        "sucesso": True, 
-                        "nome_oficial": serie.get("Name"), 
-                        "serie_id": serie.get("Id"),
-                        "url_imagem": f"{clean_url}/Items/{serie.get('Id')}/Images/Primary",
-                        "generos": generos_string  # <-- E enviamos ele aqui pro resto do programa!
+                        "success": True, 
+                        "official_name": series.get("Name"), 
+                        "series_id": series.get("Id"),
+                        "image_url": f"{clean_url}/Items/{series.get('Id')}/Images/Primary",
+                        "genres": genres_string 
                     }
-        except Exception as e:
+        except Exception:
             pass
-        return {"sucesso": False}
+        return {"success": False}
 
-    # ==========================================
-    # ETAPA 1: Busca Precisa (Mantendo o Ano)
-    # ==========================================
-    termo_preciso = limpar_nome_pesquisa(nome_pasta, remover_ano=False)
-    print(f"\n[JELLYFIN] Pesquisando (Modo Preciso): '{termo_preciso}'...")
-    resultado = tentar_buscar(termo_preciso)
-    if resultado["sucesso"]:
-        print(f"[JELLYFIN] ✅ Encontrado: {resultado['nome_oficial']}")
-        return resultado
+    # STEP 1: Precise Search
+    precise_term = clean_search_name(folder_name, remove_year=False)
+    print(f"\n[JELLYFIN] Searching (Precise Mode): '{precise_term}'...")
+    result = try_search(precise_term)
+    if result["success"]:
+        print(f"[JELLYFIN] ✅ Found: {result['official_name']}")
+        return result
 
-    # ==========================================
-    # ETAPA 2: Busca Genérica (Removendo o Ano)
-    # ==========================================
-    termo_generico = limpar_nome_pesquisa(nome_pasta, remover_ano=True)
-    if termo_generico != termo_preciso:
-        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Genérica: '{termo_generico}'...")
-        resultado = tentar_buscar(termo_generico)
-        if resultado["sucesso"]:
-            print(f"[JELLYFIN] ✅ Encontrado via Fallback: {resultado['nome_oficial']}")
-            return resultado
+    # STEP 2: Generic Search
+    generic_term = clean_search_name(folder_name, remove_year=True)
+    if generic_term != precise_term:
+        print(f"[JELLYFIN] ⚠️ Not found. Trying Generic Search: '{generic_term}'...")
+        result = try_search(generic_term)
+        if result["success"]:
+            print(f"[JELLYFIN] ✅ Found via Fallback: {result['official_name']}")
+            return result
 
-    # ==========================================
-    # ETAPA 3: Busca Ampla (Primeiras 2 Palavras)
-    # ==========================================
-    palavras = termo_generico.split()
-    if len(palavras) > 1:
-        termo_amplo = " ".join(palavras[:2])
-        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Ampla: '{termo_amplo}'...")
-        resultado = tentar_buscar(termo_amplo)
-        if resultado["sucesso"]:
-            print(f"[JELLYFIN] ✅ Encontrado via Busca Ampla: {resultado['nome_oficial']}")
-            return resultado
+    # STEP 3: Broad Search
+    words = generic_term.split()
+    if len(words) > 1:
+        broad_term = " ".join(words[:2])
+        print(f"[JELLYFIN] ⚠️ Not found. Trying Broad Search: '{broad_term}'...")
+        result = try_search(broad_term)
+        if result["success"]:
+            print(f"[JELLYFIN] ✅ Found via Broad Search: {result['official_name']}")
+            return result
 
-    # ==========================================
-    # ETAPA 4: Busca Ultra Ampla (Apenas 1ª Palavra)
-    # ==========================================
-    if len(palavras) > 0:
-        termo_ultra_amplo = palavras[0]
-        print(f"[JELLYFIN] ⚠️ Não encontrado. Tentando Busca Ultra Ampla: '{termo_ultra_amplo}'...")
-        resultado = tentar_buscar(termo_ultra_amplo)
-        if resultado["sucesso"]:
-            print(f"[JELLYFIN] ✅ Encontrado via Busca Ultra Ampla: {resultado['nome_oficial']}")
-            return resultado
+    # STEP 4: Ultra Broad Search
+    if len(words) > 0:
+        ultra_broad_term = words[0]
+        print(f"[JELLYFIN] ⚠️ Not found. Trying Ultra Broad Search: '{ultra_broad_term}'...")
+        result = try_search(ultra_broad_term)
+        if result["success"]:
+            print(f"[JELLYFIN] ✅ Found via Ultra Broad Search: {result['official_name']}")
+            return result
 
-    print(f"[JELLYFIN] ❌ Nenhuma série encontrada para a pasta '{nome_pasta}'.")
-    return {"sucesso": False}
+    print(f"[JELLYFIN] ❌ No series found for folder '{folder_name}'.")
+    return {"success": False}
 
-def baixar_imagem_jellyfin(url_imagem, api_key, pasta_destino, nome_arquivo="cover.jpg"):
-    """
-    Faz o download da imagem de capa do Jellyfin e salva na pasta de destino.
-    """
+def download_jellyfin_image(image_url, api_key, dest_folder, file_name="cover.jpg"):
     headers = {"X-Emby-Token": api_key}
-    caminho_completo = os.path.join(pasta_destino, nome_arquivo)
+    full_path = os.path.join(dest_folder, file_name)
     
     try:
-        print(f"[JELLYFIN] 📥 Iniciando download da imagem de capa...")
-        # stream=True faz o download em partes, consumindo menos memória
-        res = requests.get(url_imagem, headers=headers, stream=True, timeout=15)
+        print(f"[JELLYFIN] 📥 Starting cover image download...")
+        res = requests.get(image_url, headers=headers, stream=True, timeout=15)
         
         if res.status_code == 200:
-            # Garante que a pasta existe antes de salvar
-            os.makedirs(pasta_destino, exist_ok=True)
-            
-            # Salva o arquivo em modo binário ('wb')
-            with open(caminho_completo, 'wb') as f:
+            os.makedirs(dest_folder, exist_ok=True)
+            with open(full_path, 'wb') as f:
                 for chunk in res.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
-            print(f"[JELLYFIN] 💾 Imagem salva com sucesso em: {caminho_completo}")
-            return caminho_completo
+            print(f"[JELLYFIN] 💾 Image saved successfully at: {full_path}")
+            return full_path
         else:
-            print(f"[JELLYFIN] ❌ Falha ao baixar imagem. Servidor retornou Status: {res.status_code}")
+            print(f"[JELLYFIN] ❌ Failed to download image. Server returned Status: {res.status_code}")
             return None
-            
     except Exception as e:
-        print(f"[JELLYFIN] ❌ Erro durante o download da imagem: {e}")
+        print(f"[JELLYFIN] ❌ Error during image download: {e}")
         return None
-    
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, APIC, error, TIT2, TPE1, TALB, TPE2, TCON
 
-def injetar_metadados_mp3(caminho_mp3, caminho_imagem, titulo, album, genero):
-    """
-    Injeta a imagem de capa e metadados essenciais e limpos no arquivo .mp3.
-    """
+def inject_mp3_metadata(mp3_path, image_path, title, album, genre):
     try:
-        audio = MP3(caminho_mp3, ID3=ID3)
+        audio = MP3(mp3_path, ID3=ID3)
         try:
             audio.add_tags()
         except error:
             pass 
             
-        # 1. INJETANDO OS TEXTOS LIMPOS
-        audio.tags.add(TIT2(encoding=3, text=titulo))  # Título (Nome do arquivo)
+        audio.tags.add(TIT2(encoding=3, text=title)) 
+        audio.tags.add(TALB(encoding=3, text=album)) 
         
-        # Álbum (Nome limpo do anime). Se você preferir 100% vazio, basta comentar a linha abaixo:
-        audio.tags.add(TALB(encoding=3, text=album))   
+        if genre:
+            audio.tags.add(TCON(encoding=3, text=genre)) 
         
-        # Gênero dinâmico do Jellyfin
-        if genero:
-            audio.tags.add(TCON(encoding=3, text=genero))          
-        
-        # 2. INJETANDO A IMAGEM
-        if caminho_imagem and os.path.exists(caminho_imagem):
-            with open(caminho_imagem, 'rb') as f:
-                dados_imagem = f.read()
+        if image_path and os.path.exists(image_path):
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
                 
-            mime_type = 'image/png' if caminho_imagem.lower().endswith('.png') else 'image/jpeg'
+            mime_type = 'image/png' if image_path.lower().endswith('.png') else 'image/jpeg'
             
             audio.tags.add(
                 APIC(
@@ -469,551 +355,680 @@ def injetar_metadados_mp3(caminho_mp3, caminho_imagem, titulo, album, genero):
                     mime=mime_type,   
                     type=3,           
                     desc=u'Cover',    
-                    data=dados_imagem 
+                    data=image_data 
                 )
             )
         
         audio.save(v2_version=3)
         return True
-        
     except Exception as e:
-        print(f"[MP3] ❌ Erro ao injetar metadados: {e}")
+        print(f"[MP3] ❌ Error injecting metadata: {e}")
         return False
 
+def process_folder_artwork(anime_folder_path, anime_folder_name, config):
+    print(f"\n[AUTOMATION] 🎬 Starting metadata processing for: {anime_folder_name}")
+    
+    local_cover_names = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
+    final_image_path = None
+    temp_image = False 
+    
+    final_genre = "" 
+    final_album_name = anime_folder_name 
+
+    for file_name in local_cover_names:
+        test_path = os.path.join(anime_folder_path, file_name)
+        if os.path.exists(test_path):
+            print(f"[AUTOMATION] 🔍 Priority 2 Triggered: Local image found ({file_name})")
+            final_image_path = test_path
+            break
+
+    jelly_url = config.get("jelly_url")
+    jelly_api = config.get("jelly_api")
+    
+    if jelly_url and jelly_api:
+        print("[AUTOMATION] 🌐 Querying Jellyfin for additional metadata...")
+        search_result = fetch_jellyfin_data(anime_folder_name, jelly_url, jelly_api)
+        
+        if search_result["success"]:
+            final_genre = search_result["genres"]
+            final_album_name = search_result["official_name"]
+            
+            if final_genre:
+                print(f"[AUTOMATION] 🏷️ Genres found: {final_genre}")
+            
+            if not final_image_path and search_result["image_url"]:
+                temp_folder = tempfile.gettempdir()
+                temp_file_name = f"temp_cover_{search_result['series_id']}.jpg"
+                
+                final_image_path = download_jellyfin_image(
+                    image_url=search_result["image_url"],
+                    api_key=jelly_api,
+                    dest_folder=temp_folder,
+                    file_name=temp_file_name
+                )
+                temp_image = True
+    else:
+        print("[AUTOMATION] ⚠️ Jellyfin not configured/disabled. Skipping online search.")
+
+    print("[AUTOMATION] 🚀 Scanning folder to apply metadata to MP3 files...")
+    mp3_found = 0
+    
+    for root, subfolders, files in os.walk(anime_folder_path):
+        for file in files:
+            if file.lower().endswith('.mp3'):
+                full_mp3_path = os.path.join(root, file)
+                music_title = os.path.splitext(file)[0]
+                
+                if inject_mp3_metadata(full_mp3_path, final_image_path, music_title, final_album_name, final_genre):
+                    mp3_found += 1
+                    
+    print(f"[AUTOMATION] ✨ Done! Metadata applied to {mp3_found} MP3 file(s).")
+    
+    if temp_image and final_image_path:
+        try:
+            os.remove(final_image_path)
+            print("[AUTOMATION] 🧹 Temporary image file deleted successfully. Folder clean!")
+        except Exception as e:
+            print(f"[AUTOMATION] ⚠️ Could not delete temporary image: {e}")
+
 # =======================================================
-# PONTE DE COMUNICAÇÃO JS -> PYTHON (A CLASSE API)
+# JS -> PYTHON COMMUNICATION BRIDGE (API CLASS)
 # =======================================================
 class Api:
-    def selecionar_pasta(self):
+    def select_folder(self):
         try:
-            pasta = ""
-            # 1. Tenta abrir pelo PyWebView (Modo Desktop)
+            folder = ""
             if len(webview.windows) > 0:
-                resultado = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
-                if resultado:
-                    pasta = resultado[0]
+                result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+                if result:
+                    folder = result[0]
             else:
-                # 2. Fallback (Modo Server): Usa o Tkinter nativo para forçar a janela do Windows!
                 root = tk.Tk()
-                root.withdraw() # Esconde a janela principal cinza do Tkinter
-                root.attributes('-topmost', True) # Força a janela a pular por cima do Navegador
-                pasta = filedialog.askdirectory(title="Selecione o diretório de Mídia")
+                root.withdraw() 
+                root.attributes('-topmost', True) 
+                folder = filedialog.askdirectory(title="Select Media Directory")
                 root.destroy()
             
-            # Se o usuário fechou a janela sem selecionar nada
-            if not pasta:
-                return {"sucesso": False, "erro": "Nenhuma pasta selecionada."}
+            if not folder:
+                return {"success": False, "error": "No folder selected."}
                 
-            # Varre as temporadas
-            temporadas = []
+            seasons = []
             try:
-                for item in os.listdir(pasta):
-                    if os.path.isdir(os.path.join(pasta, item)) and item != "theme-music":
-                        temporadas.append(item)
+                for item in os.listdir(folder):
+                    if os.path.isdir(os.path.join(folder, item)) and item != "theme-music":
+                        seasons.append(item)
             except Exception as e:
-                print(f"Erro ao ler pasta: {e}")
+                print(f"Error reading folder: {e}")
                 
-            return {"sucesso": True, "caminho": pasta, "temporadas": temporadas}
+            return {"success": True, "path": folder, "seasons": seasons}
             
         except Exception as e:
-            print(f"Erro fatal no Browse: {e}")
-            return {"sucesso": False, "erro": str(e)}
+            print(f"Fatal error in Browse: {e}")
+            return {"success": False, "error": str(e)}
         
-    def _resolver_pastas_inteligentes(self, pasta, modo_batch):
-        if not pasta: return pasta
+    def _resolve_smart_folders(self, folder, batch_mode):
+        if not folder: 
+            return folder
         
-        pasta_atual = os.path.normpath(pasta)
+        current_folder = os.path.normpath(folder)
         
-        # 1. Encontrar a "Mãe" (O Anime exato, ex: Akame Ga Kill)
-        # Sobe se o utilizador clicou sem querer numa subpasta (theme-music, Season...)
         for _ in range(3):
-            nome = os.path.basename(pasta_atual).lower()
-            if "season" in nome or "theme" in nome or "main" in nome:
-                pasta_atual = os.path.dirname(pasta_atual)
+            name = os.path.basename(current_folder).lower()
+            if "season" in name or "theme" in name or "main" in name:
+                current_folder = os.path.dirname(current_folder)
             else:
                 break
                 
-        pasta_anime = pasta_atual
+        anime_folder = current_folder
         
-        if not modo_batch:
-            # MODO THIS (Só este anime): Retorna a "Mãe"
-            return pasta_anime
+        if not batch_mode:
+            return anime_folder
         else:
-            # MODO ALL (Todos os animes): Precisamos da "Avó" (ex: Animes)
-            
-            # PROTEÇÃO MÁXIMA: E se o utilizador já tiver selecionado a pasta "Animes" direto?
-            # Vamos olhar para dentro da pasta. Se ela tiver arquivos de vídeo ou uma pasta "theme-music",
-            # significa que ela é um Anime! Então podemos subir para a Avó em segurança.
-            e_anime = False
+            is_anime = False
             try:
-                for item in os.listdir(pasta_anime):
-                    item_min = item.lower()
-                    if item_min == "theme-music" or item_min.startswith("season"):
-                        e_anime = True
+                for item in os.listdir(anime_folder):
+                    item_lower = item.lower()
+                    if item_lower == "theme-music" or item_lower.startswith("season"):
+                        is_anime = True
                         break
-                    # Se tiver ficheiros de vídeo/áudio na raiz, também é anime
-                    if os.path.isfile(os.path.join(pasta_anime, item)) and item_min.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
-                        e_anime = True
+                    if os.path.isfile(os.path.join(anime_folder, item)) and item_lower.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
+                        is_anime = True
                         break
             except:
                 pass
                 
-            if e_anime:
-                pasta_avo = os.path.dirname(pasta_anime)
-                # Proteção: Não sobe se a avó for a raiz do disco (ex: C:\)
-                if os.path.ismount(pasta_avo) or len(pasta_avo) <= 3:
-                    return pasta_anime
-                return pasta_avo
+            if is_anime:
+                parent_folder = os.path.dirname(anime_folder)
+                if os.path.ismount(parent_folder) or len(parent_folder) <= 3:
+                    return anime_folder
+                return parent_folder
             else:
-                # Se não encontrou características de anime, assumimos que já estamos na pasta Avó ("Animes")
-                return pasta_anime
+                return anime_folder
 
-    def _auto_organizar_temporada_unica(self, pasta_anime):
-        """Verifica se os ficheiros de vídeo e a pasta theme-music estão soltos e organiza-os numa pasta Season 01."""
+    def _auto_organize_single_season(self, anime_folder):
         try:
-            itens_na_pasta = os.listdir(pasta_anime)
+            items_in_folder = os.listdir(anime_folder)
+            has_season = any("season" in item.lower() for item in items_in_folder if os.path.isdir(os.path.join(anime_folder, item)))
             
-            # Verifica se já tem alguma pasta de temporada
-            tem_temporada = any("season" in item.lower() for item in itens_na_pasta if os.path.isdir(os.path.join(pasta_anime, item)))
-            
-            if not tem_temporada:
-                nome_anime = os.path.basename(pasta_anime)
-                nome_nova_temp = f"Season 01. {nome_anime}"
-                caminho_nova_temp = os.path.join(pasta_anime, nome_nova_temp)
+            if not has_season:
+                anime_name = os.path.basename(anime_folder)
+                new_season_name = f"Season 01. {anime_name}"
+                new_season_path = os.path.join(anime_folder, new_season_name)
                 
-                extensoes_media = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
-                itens_movidos = 0
+                media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
+                moved_items = 0
                 
-                for item in itens_na_pasta:
-                    caminho_item = os.path.join(pasta_anime, item)
+                for item in items_in_folder:
+                    item_path = os.path.join(anime_folder, item)
                     
-                    # 1. Move os ficheiros de vídeo/legendas
-                    if os.path.isfile(caminho_item) and item.lower().endswith(extensoes_media):
-                        if not os.path.exists(caminho_nova_temp):
-                            os.makedirs(caminho_nova_temp)
-                        shutil.move(caminho_item, os.path.join(caminho_nova_temp, item))
-                        itens_movidos += 1
+                    if os.path.isfile(item_path) and item.lower().endswith(media_extensions):
+                        os.makedirs(new_season_path, exist_ok=True)
+                        shutil.move(item_path, os.path.join(new_season_path, item))
+                        moved_items += 1
                         
-                    # 2. Move a pasta theme-music inteira
-                    elif os.path.isdir(caminho_item) and item.lower() == "theme-music":
-                        if not os.path.exists(caminho_nova_temp):
-                            os.makedirs(caminho_nova_temp)
-                        shutil.move(caminho_item, os.path.join(caminho_nova_temp, item))
-                        itens_movidos += 1
+                    elif os.path.isdir(item_path) and item.lower() == "theme-music":
+                        os.makedirs(new_season_path, exist_ok=True)
+                        shutil.move(item_path, os.path.join(new_season_path, item))
+                        moved_items += 1
                         
-                if itens_movidos > 0:
-                    print(f"\n[AUTO-ORGANIZE] 🧹 {itens_movidos} item(ns) arrumados automaticamente para '{nome_nova_temp}'!")
+                if moved_items > 0:
+                    print(f"\n[AUTO-ORGANIZE] 🧹 {moved_items} item(s) automatically organized into '{new_season_name}'!")
         except Exception as e:
-            print(f"[AUTO-ORGANIZE] ❌ Erro ao organizar pasta {pasta_anime}: {e}")
+            print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {anime_folder}: {e}")
 
-    def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo, opcoes=None):
-        # Se não vierem opções (por segurança), assume que é para fazer tudo
-        if opcoes is None:
-            opcoes = {"normalize": True, "metadata": True, "organize": True}
+    def enhance_local_music(self, target_folder, batch_mode, target_lufs, options=None):
+        if options is None:
+            options = {"normalize": True, "metadata": True, "organize": True}
             
-        if not pasta_alvo or not os.path.exists(pasta_alvo):
-            return {"status": "erro", "mensagem": "Invalid directory."}
+        if not target_folder or not os.path.exists(target_folder):
+            return {"status": "error", "message": "Invalid directory."}
         
-        if modo_batch:
-            pasta_alvo = self._resolver_pastas_inteligentes(pasta_alvo, modo_batch)
+        if batch_mode:
+            target_folder = self._resolve_smart_folders(target_folder, batch_mode)
             
         try:
             print("\n=======================================================")
-            print("[ENHANCE] Iniciando processo de melhoria de áudio...")
-            print(f"[ENHANCE] Modo Batch (Todas as subpastas): {'Sim' if modo_batch else 'Não'}")
-            print(f"[ENHANCE] Volume Alvo: {lufs_alvo} LUFS")
-            print(f"[ENHANCE] Opções ativas: {opcoes}")
+            print("[ENHANCE] Starting audio enhancement process...")
+            print(f"[ENHANCE] Batch Mode (All subfolders): {'Yes' if batch_mode else 'No'}")
+            print(f"[ENHANCE] Target Volume: {target_lufs} LUFS")
+            print(f"[ENHANCE] Active Options: {options}")
             print("=======================================================\n")
 
-            arquivos_afetados = 0
-            pastas_para_processar = []
+            affected_files = 0
+            folders_to_process = []
             
-            if modo_batch:
-                for item in os.listdir(pasta_alvo):
-                    caminho_item = os.path.join(pasta_alvo, item)
-                    if os.path.isdir(caminho_item):
-                        pastas_para_processar.append(caminho_item)
+            if batch_mode:
+                for item in os.listdir(target_folder):
+                    item_path = os.path.join(target_folder, item)
+                    if os.path.isdir(item_path):
+                        folders_to_process.append(item_path)
             else:
-                pastas_para_processar.append(pasta_alvo)
+                folders_to_process.append(target_folder)
 
-            config_atual = self.obter_configuracoes() 
+            current_config = self.get_settings() 
             
-            for pasta_anime in pastas_para_processar:
-                nome_anime = os.path.basename(pasta_anime)
+            for anime_folder in folders_to_process:
+                anime_name = os.path.basename(anime_folder)
                 
-                # 1. ORGANIZAR (Se marcado)
-                if opcoes.get("organize", True):
-                    self._auto_organizar_temporada_unica(pasta_anime)
+                if options.get("organize", True):
+                    self._auto_organize_single_season(anime_folder)
                 
-                # Se não for para normalizar nem pôr metadados, ignora a procura de MP3
-                if not opcoes.get("normalize", True) and not opcoes.get("metadata", True):
+                if not options.get("normalize", True) and not options.get("metadata", True):
                     continue
 
-                mp3s_nesta_pasta = []
+                mp3s_in_folder = []
                 
-                for raiz, _, arquivos in os.walk(pasta_anime):
-                    for arquivo in arquivos:
-                        if arquivo.lower().endswith('.mp3'):
-                            caminho_mp3 = os.path.join(raiz, arquivo)
-                            mp3s_nesta_pasta.append(caminho_mp3)
+                for root, _, files in os.walk(anime_folder):
+                    for file in files:
+                        if file.lower().endswith('.mp3'):
+                            mp3_path = os.path.join(root, file)
+                            mp3s_in_folder.append(mp3_path)
                 
-                if not mp3s_nesta_pasta:
+                if not mp3s_in_folder:
                     continue 
                 
-                print(f"\n[ENHANCE] ✨ Melhorando áudios na pasta: {nome_anime}")
+                print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {anime_name}")
                 
-                for mp3 in mp3s_nesta_pasta:
-                    # 2. NORMALIZAR (Se marcado)
-                    if opcoes.get("normalize", True):
-                        print(f"[ENHANCE] 🎚️ Normalizando: {os.path.basename(mp3)}")
-                        if normalizar_audio_ffmpeg(mp3, lufs_alvo):
-                            arquivos_afetados += 1
+                for mp3 in mp3s_in_folder:
+                    if options.get("normalize", True):
+                        print(f"[ENHANCE] 🎚️ Normalizing: {os.path.basename(mp3)}")
+                        if normalize_audio_ffmpeg(mp3, target_lufs):
+                            affected_files += 1
                     else:
-                        arquivos_afetados += 1 # Conta como afetado para os metadados
+                        affected_files += 1 
                             
-                # 3. METADADOS (Se marcado)
-                if opcoes.get("metadata", True):
-                    processar_capas_pasta_atual(pasta_anime, nome_anime, config_atual)
+                if options.get("metadata", True):
+                    process_folder_artwork(anime_folder, anime_name, current_config)
                 
             print("\n=======================================================")
-            print(f"[ENHANCE] Concluído! {arquivos_afetados} arquivo(s) modificado(s)/lido(s).")
+            print(f"[ENHANCE] Complete! {affected_files} file(s) modified/read.")
             print("=======================================================\n")
             
-            # Se organizou a pasta ou editou ficheiros, retorna sucesso
-            if arquivos_afetados > 0 or opcoes.get("organize", True):
-                return {"status": "sucesso", "mensagem": f"Done! Process completed successfully."}
+            if affected_files > 0 or options.get("organize", True):
+                return {"status": "success", "message": "Done! Process completed successfully."}
             else:
-                return {"status": "sucesso", "mensagem": "No .mp3 files found to enhance."}
+                return {"status": "success", "message": "No .mp3 files found to enhance."}
                 
         except Exception as e:
-            print(f"\n[ENHANCE] ❌ Erro crítico: {e}")
-            return {"status": "erro", "mensagem": f"Error: {str(e)}"}
-
-    def apagar_musicas_pasta(self, pasta_raiz, modo_batch=False):
-        if not pasta_raiz or not os.path.exists(pasta_raiz):
-            return {"status": "erro", "mensagem": "Invalid or missing directory."}
+            print(f"\n[ENHANCE] ❌ Critical error: {e}")
+            return {"status": "error", "message": f"Error: {str(e)}"}
         
-        # Aplica a inteligência da Mãe/Avó
-        pasta_alvo = self._resolver_pastas_inteligentes(pasta_raiz, modo_batch)
+    def delete_music_folder(self, root_folder, batch_mode=False):
+            if not root_folder or not os.path.exists(root_folder):
+                return {"status": "error", "message": "Invalid or missing directory."}
         
-        apagados = 0
-        try:
-            print(f"\n=======================================================")
-            print(f"[CLEANUP] Iniciando limpeza de áudios em: {pasta_alvo}")
-            print(f"[CLEANUP] Modo: {'ALL ANIMES (Avó)' if modo_batch else 'CURRENT ANIME (Mãe)'}")
-            print(f"=======================================================\n")
+            # Apply Mother/Grandmother intelligence
+            target_folder = self._resolve_smart_folders(root_folder, batch_mode)
+        
+            deleted_count = 0
+            try:
+                print(f"\n=======================================================")
+                print(f"[CLEANUP] Starting audio cleanup in: {target_folder}")
+                print(f"[CLEANUP] Mode: {'ALL ANIMES (Grandmother)' if batch_mode else 'CURRENT ANIME (Mother)'}")
+                print(f"=======================================================\n")
             
-            # Varre tudo a partir da pasta alvo definida pela inteligência
-            for raiz, subpastas, arquivos in os.walk(pasta_alvo):
-                for arquivo in arquivos:
-                    if arquivo.lower().endswith('.mp3'):
-                        caminho_completo = os.path.join(raiz, arquivo)
-                        os.remove(caminho_completo)
-                        print(f"[CLEANUP] 🗑️ Removido: {arquivo}")
-                        apagados += 1
+                # Scan everything starting from the target folder
+                for root, subfolders, files in os.walk(target_folder):
+                    for file in files:
+                        if file.lower().endswith('.mp3'):
+                            full_path = os.path.join(root, file)
+                            os.remove(full_path)
+                            print(f"[CLEANUP] 🗑️ Removed: {file}")
+                            deleted_count += 1
             
-            # Limpa pastas "theme-music" que tenham ficado vazias
-            for raiz, subpastas, arquivos in os.walk(pasta_alvo, topdown=False):
-                for subpasta in subpastas:
-                    if subpasta.lower() == 'theme-music':
-                        caminho_sub = os.path.join(raiz, subpasta)
-                        if not os.listdir(caminho_sub): 
-                            os.rmdir(caminho_sub)
+                # Clean up empty "theme-music" folders
+                for root, subfolders, files in os.walk(target_folder, topdown=False):
+                    for subfolder in subfolders:
+                        if subfolder.lower() == 'theme-music':
+                            sub_path = os.path.join(root, subfolder)
+                            if not os.listdir(sub_path): 
+                                os.rmdir(sub_path)
                             
-            print(f"\n[CLEANUP] Concluído! {apagados} arquivo(s) removido(s).")
-            return {"status": "sucesso", "mensagem": f"Cleaned up! {apagados} audio file(s) removed."}
+                print(f"\n[CLEANUP] Done! {deleted_count} file(s) removed.")
+                return {"status": "success", "message": f"Cleaned up! {deleted_count} audio file(s) removed."}
             
-        except Exception as e:
-            print(f"[CLEANUP] ❌ Erro: {e}")
-            return {"status": "erro", "mensagem": f"Error during cleanup: {str(e)}"}
+            except Exception as e:
+                print(f"[CLEANUP] ❌ Error: {e}")
+                return {"status": "error", "message": f"Error during cleanup: {str(e)}"}
 
-    def obter_status(self):
-        global estado_global
+    def get_status(self):
+        global global_state
         logs = ""
-        while not fila_logs.empty():
-            logs += fila_logs.get()
-            
+        while not log_queue.empty():
+            logs += log_queue.get()
+                
         return {
             "logs": logs,
-            "is_processing": estado_global["is_processing"],
-            "porcentagem": estado_global["porcentagem"],
-            "textoStatus": estado_global["textoStatus"],
-            "textoPorcentagem": estado_global["textoPorcentagem"],
-            "itens_status": estado_global["itens_status"]
+            "is_processing": global_state["is_processing"],
+            "percentage": global_state["percentage"],
+            "statusText": global_state["statusText"],
+            "percentageText": global_state["percentageText"],
+            "item_statuses": global_state["item_statuses"]
         }
-
-    def processar_fila(self, lista_musicas, pasta_anime_raiz):
-        global estado_global
-        estado_global["is_processing"] = True
-        estado_global["porcentagem"] = 0
-        estado_global["textoStatus"] = "Starting..."
-        estado_global["textoPorcentagem"] = "0%"
-        estado_global["itens_status"] = ["aguardando"] * len(lista_musicas)
-
-        t = threading.Thread(target=self._executar_fila_thread, args=(lista_musicas, pasta_anime_raiz))
+    
+    def retry_single_item(self, index, music, root_anime_folder):
+        global global_state
+        global_state["is_processing"] = True
+        global_state["item_statuses"][index] = "processing"
+        global_state["statusText"] = f"Retrying: {music.get('name', music.get('nome'))}..."
+        
+        t = threading.Thread(target=self._execute_single_retry_thread, args=(index, music, root_anime_folder))
         t.daemon = True
         t.start()
         return True
 
-    def _executar_fila_thread(self, lista_musicas, pasta_anime_raiz):
-        global estado_global
-
-        total = len(lista_musicas)
-
-        estado_global["itens_status"] = ["aguardando"] * total 
-        estado_global["porcentagem"] = 0
-        estado_global["is_processing"] = True
-        estado_global["textoStatus"] = "Starting process..."
-        estado_global["textoPorcentagem"] = f"0/{total} (0%)"
-
-        print(f"\n[SISTEMA] Iniciando fila com {total} itens...\n")
-
-        qtd_main = sum(1 for m in lista_musicas if m['destino'] == 'Main Theme')
-        tem_multi_main = qtd_main > 1
-        temporadas_para_limpar = set()
-
-        for i, musica in enumerate(lista_musicas):
-            link = musica['link']
-            nome = musica['nome']
-            destino = musica['destino']
-            lufs = musica['lufs']
+    def _execute_single_retry_thread(self, index, music, root_anime_folder):
+        global global_state
+        
+        link = music['link']
+        name = music.get('name', music.get('nome'))
+        destination = music.get('destination', music.get('destino'))
+        lufs = music['lufs']
+        has_multi_main = music.get('has_multi_main', False)
+        
+        print(f"\n[SYSTEM] Retrying single item: {name}...\n")
+        
+        downloaded_file = None
+        try:
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                try:
+                    downloaded_file = download_music(link)
+                    break
+                except Exception as dl_error:
+                    if attempt == max_attempts - 1:
+                        raise dl_error
+                    print(f"[RETRY] ⚠️ Attempt {attempt + 1} failed for '{name}'. Retrying...")
+                    
+            global_state["statusText"] = f"Normalizing: {name}..."
             
-            porcentagem = int((i / total) * 100)
-            texto_perc = f"{porcentagem}%" if i == 0 else f"{i}/{total} ({porcentagem}%)"
+            if "Season" in destination:
+                theme_type = "season"
+                temp_folder = destination
+            else:
+                theme_type = "main"
+                temp_folder = None
 
-            estado_global["itens_status"][i] = "processando"
-            estado_global["porcentagem"] = porcentagem
-            estado_global["textoStatus"] = f"Downloading: {nome}..."
-            estado_global["textoPorcentagem"] = texto_perc
+            final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
+            normalize_and_save(downloaded_file, final_path, lufs)
+            
+            if "Season" in destination:
+                move_loose_episodes(root_anime_folder, destination)
+                
+            current_config = load_config()
+            anime_name = os.path.basename(root_anime_folder)
+            if not current_config.get("jelly_check"):
+                current_config["jelly_url"] = ""
+                current_config["jelly_api"] = ""
+            process_folder_artwork(root_anime_folder, anime_name, current_config)
+            
+            global_state["item_statuses"][index] = "completed"
+            global_state["statusText"] = "Item processed successfully!"
+            print(f"[SUCCESS] Single retry for {name} completed!")
+            
+        except Exception as e:
+            print(f"\n[ERROR] Single retry failed for {name}: {str(e)}\n")
+            global_state["item_statuses"][index] = "error"
+            global_state["statusText"] = f"Failed to retry {name}"
+            
+        finally:
+            if downloaded_file and os.path.exists(downloaded_file):
+                try:
+                    os.remove(downloaded_file)
+                except Exception as e:
+                    print(f"[WARNING] Could not delete temporary file: {e}")
+            
+            if "processing" not in global_state["item_statuses"]:
+                global_state["is_processing"] = False
 
-            arquivo_baixado = None # Cria a variável vazia primeiro
+    def process_queue(self, music_list, root_anime_folder):
+        global global_state
+        global_state["is_processing"] = True
+        global_state["percentage"] = 0
+        global_state["statusText"] = "Starting..."
+        global_state["percentageText"] = "0%"
+        global_state["item_statuses"] = ["waiting"] * len(music_list)
+
+        t = threading.Thread(target=self._execute_queue_thread, args=(music_list, root_anime_folder))
+        t.daemon = True
+        t.start()
+        return True
+
+    def _execute_queue_thread(self, music_list, root_anime_folder):
+        global global_state
+
+        total = len(music_list)
+
+        global_state["item_statuses"] = ["waiting"] * total 
+        global_state["percentage"] = 0
+        global_state["is_processing"] = True
+        global_state["statusText"] = "Starting process..."
+        global_state["percentageText"] = f"0/{total} (0%)"
+
+        print(f"\n[SYSTEM] Starting queue with {total} items...\n")
+
+        main_count = sum(1 for m in music_list if m.get('destination', m.get('destino')) == 'Main Theme')
+        has_multi_main = main_count > 1
+        seasons_to_clean = set()
+
+        for i, music in enumerate(music_list):
+            link = music['link']
+            name = music.get('name', music.get('nome'))
+            destination = music.get('destination', music.get('destino'))
+            lufs = music['lufs']
+            
+            percentage = int((i / total) * 100)
+            perc_text = f"{percentage}%" if i == 0 else f"{i}/{total} ({percentage}%)"
+
+            global_state["item_statuses"][i] = "processing"
+            global_state["percentage"] = percentage
+            global_state["statusText"] = f"Downloading: {name}..."
+            global_state["percentageText"] = perc_text
+
+            downloaded_file = None 
             try:
-                arquivo_baixado = baixar_musica(link)
+                max_attempts = 2
+                for attempt in range(max_attempts):
+                    try:
+                        downloaded_file = download_music(link)
+                        break
+                    except Exception as dl_error:
+                        if attempt == max_attempts - 1:
+                            raise dl_error
+                        print(f"[RETRY] ⚠️ Attempt {attempt + 1} failed to download '{name}'. Retrying automatically...")
                 
-                estado_global["textoStatus"] = f"Normalizing: {nome}..."
+                global_state["statusText"] = f"Normalizing: {name}..."
                 
-                if "Season" in destino:
-                    tipo_tema = "temporada"
-                    pasta_temp = destino
-                    temporadas_para_limpar.add(pasta_temp)
+                if "Season" in destination:
+                    theme_type = "season"
+                    temp_folder = destination
+                    seasons_to_clean.add(temp_folder)
                 else:
-                    tipo_tema = "main"
-                    pasta_temp = None
+                    theme_type = "main"
+                    temp_folder = None
 
-                caminho_final = gerar_caminho_destino(pasta_anime_raiz, tipo_tema, nome, pasta_temp, multiplos_main=tem_multi_main)
-                normalizar_e_salvar(arquivo_baixado, caminho_final, lufs)
+                final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
+                normalize_and_save(downloaded_file, final_path, lufs)
                 
-                estado_global["itens_status"][i] = "concluido"
-                print(f"[SUCESSO] {nome} finalizado com sucesso!")
+                global_state["item_statuses"][i] = "completed"
+                print(f"[SUCCESS] {name} finished successfully!")
                 
             except Exception as e:
-                print(f"\n[ERRO] Falha ao processar {nome}: {str(e)}\n")
-                estado_global["itens_status"][i] = "erro"
+                print(f"\n[ERROR] Failed to process {name}: {str(e)}\n")
+                global_state["item_statuses"][i] = "error"
                 
             finally:
-                # FAXINA GARANTIDA: Independentemente de ter dado sucesso ou erro fatal, o lixo temporário some!
-                if arquivo_baixado and os.path.exists(arquivo_baixado):
+                # GUARANTEED CLEANUP
+                if downloaded_file and os.path.exists(downloaded_file):
                     try:
-                        os.remove(arquivo_baixado)
+                        os.remove(downloaded_file)
                     except Exception as e:
-                        print(f"[AVISO] Não foi possível apagar o lixo temporário: {e}")
+                        print(f"[WARNING] Could not delete temporary file: {e}")
 
-        if temporadas_para_limpar:
-            print("\n[SISTEMA] Iniciando Faxina Inteligente nas temporadas afetadas...")
-            for temp in temporadas_para_limpar:
-                mover_episodios_soltos(pasta_anime_raiz, temp)
+        if seasons_to_clean:
+            print("\n[SYSTEM] Starting Smart Cleanup on affected seasons...")
+            for temp in seasons_to_clean:
+                move_loose_episodes(root_anime_folder, temp)
 
-        estado_global["porcentagem"] = 99
-        estado_global["textoStatus"] = "Applying Cover Arts..."
-        estado_global["textoPorcentagem"] = "99%"
+        global_state["percentage"] = 99
+        global_state["statusText"] = "Applying Cover Arts..."
+        global_state["percentageText"] = "99%"
         
-        config_atual = carregar_config()
-        nome_do_anime = os.path.basename(pasta_anime_raiz)
+        current_config = load_config()
+        anime_name = os.path.basename(root_anime_folder)
         
-        if not config_atual.get("jelly_check"):
-            config_atual["jelly_url"] = ""
-            config_atual["jelly_api"] = ""
+        if not current_config.get("jelly_check"):
+            current_config["jelly_url"] = ""
+            current_config["jelly_api"] = ""
 
-        processar_capas_pasta_atual(pasta_anime_raiz, nome_do_anime, config_atual)
+        process_folder_artwork(root_anime_folder, anime_name, current_config)
 
-        # Processo terminado!
-        estado_global["porcentagem"] = 100
-        estado_global["textoStatus"] = "All operations completed!"
-        estado_global["textoPorcentagem"] = f"{total}/{total} (100%)"
-        estado_global["is_processing"] = False # Desliga a flag de processamento!
+        # Process complete!
+        global_state["percentage"] = 100
+        global_state["statusText"] = "All operations completed!"
+        global_state["percentageText"] = f"{total}/{total} (100%)"
+        global_state["is_processing"] = False 
         
-        print("\n[SISTEMA] Fila concluída com sucesso! Aguardando novos comandos...")
+        print("\n[SYSTEM] Queue completed successfully! Waiting for new commands...")
 
 
-    def testar_jellyfin(self, url, api_key):
+    def test_jellyfin(self, url, api_key):
         try:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
+                
             url = str(url).strip().strip('"').strip("'")
             api_key = str(api_key).strip().strip('"').strip("'")
-            
+                
             if not url.startswith('http'):
                 url = 'http://' + url
             clean_url = url.rstrip('/')
-            
+                
             headers = {
                 "X-Emby-Token": api_key,
                 "Accept": "application/json"
             }
-            
-            resposta = requests.get(f"{clean_url}/System/Info", headers=headers, timeout=5, verify=False)
-            
-            if resposta.status_code == 200:
-                return {"status": "sucesso", "mensagem": "✅ Connected Successfully!"}
-            else:
-                return {"status": "erro", "mensagem": f"❌ Error {resposta.status_code}: API Key rejected by server."}
                 
+            response = requests.get(f"{clean_url}/System/Info", headers=headers, timeout=5, verify=False)
+                
+            if response.status_code == 200:
+                return {"status": "success", "message": "✅ Connected Successfully!"}
+            else:
+                return {"status": "error", "message": f"❌ Error {response.status_code}: API Key rejected by server."}
+                    
         except Exception as e:
-            return {"status": "erro", "mensagem": f"❌ Connection Error: {str(e)}"}
-        
-    def obter_configuracoes(self):
-        return carregar_config()
+            return {"status": "error", "message": f"❌ Connection Error: {str(e)}"}
+            
+    def get_settings(self):
+        return load_config()
 
-    def salvar_configuracoes(self, dados):
-        salvar_config(dados)
+    def save_settings(self, data):
+        save_config(data)
         return True
 
 # ========================================================
-# ESTADO GLOBAL DO SISTEMA (Novo Padrão Polling)
+# GLOBAL SYSTEM STATE (Polling Pattern)
 # ========================================================
-estado_global = {
+global_state = {
     "is_processing": False,
-    "porcentagem": 0,
-    "textoStatus": "Ready",
-    "textoPorcentagem": "0%",
-    "itens_status": []  # Guarda se o item está em 'aguardando', 'processando', 'concluido' ou 'erro'
+    "percentage": 0,
+    "statusText": "Ready",
+    "percentageText": "0%",
+    "item_statuses": [] 
 }
 
 # ========================================================
-# ROTAS DO FLASK PARA O MODO NAVEGADOR (O "PLANO B")
+# FLASK ROUTES (BROWSER MODE API)
 # ========================================================
-# Criamos a API aqui fora para o Flask e a Janela usarem a mesma!
-api_sistema = Api() 
+api_system = Api() 
 
-@app.route('/api/selecionar_pasta', methods=['POST'])
-def flask_selecionar_pasta():
-    # Chama a função da API e retorna como JSON pro navegador
-    resultado = api_sistema.selecionar_pasta()
-    return jsonify(resultado)
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-@app.route('/api/obter_configuracoes', methods=['GET'])
-def flask_obter_configuracoes():
-    return jsonify(api_sistema.obter_configuracoes())
+@app.route('/api/select_folder', methods=['POST'])
+def api_flask_select_folder():
+    result = api_system.select_folder()
+    return jsonify(result)
 
-@app.route('/api/salvar_configuracoes', methods=['POST'])
-def flask_salvar_configuracoes():
-    dados = request.json
-    api_sistema.salvar_configuracoes(dados)
-    return jsonify({"status": "sucesso"})
+@app.route('/api/get_settings', methods=['GET'])
+def api_flask_get_settings():
+    return jsonify(api_system.get_settings())
 
-@app.route('/api/processar_fila', methods=['POST'])
-def api_flask_processar_fila():
-    dados = request.json
-    fila = dados.get('fila', [])
-    pasta = dados.get('pasta', '')
-    api_sistema.processar_fila(fila, pasta)
-    return jsonify({"status": "sucesso"})
+@app.route('/api/save_settings', methods=['POST'])
+def api_flask_save_settings():
+    data = request.json
+    api_system.save_settings(data)
+    return jsonify({"status": "success"})
+
+@app.route('/api/process_queue', methods=['POST'])
+def api_flask_process_queue():
+    data = request.json
+    queue_data = data.get('queue', data.get('fila', []))
+    folder = data.get('folder', data.get('pasta', ''))
+    api_system.process_queue(queue_data, folder)
+    return jsonify({"status": "success"})
 
 @app.route('/api/status', methods=['GET'])
 def api_flask_status():
-    return jsonify(api_sistema.obter_status())
+    return jsonify(api_system.get_status())
 
-@app.route('/api/testar_jellyfin', methods=['POST'])
-def api_flask_testar_jellyfin():
+@app.route('/api/test_jellyfin', methods=['POST'])
+def api_flask_test_jellyfin():
     try:
-        dados = request.get_json(force=True, silent=True) or {}
+        data = request.get_json(force=True, silent=True) or {}
         
-        url = dados.get('url', '')
-        # Agora o Flask é inteligente: procura por 'api_key', e se não achar, procura por 'api'
-        api_key = dados.get('api_key', dados.get('api', '')) 
+        url = data.get('url', '')
+        api_key = data.get('api_key', data.get('api', '')) 
         
         print(f"\n[RECEIVED FROM BROWSER] URL: {url} | API: {api_key}")
         
-        resultado = api_sistema.testar_jellyfin(url, api_key)
-        return jsonify(resultado)
+        result = api_system.test_jellyfin(url, api_key)
+        return jsonify(result)
         
     except Exception as e:
-        return jsonify({"status": "erro", "mensagem": f"❌ Flask Route Error: {str(e)}"})
+        return jsonify({"status": "error", "message": f"❌ Flask Route Error: {str(e)}"})
     
-@app.route('/api/apagar_musicas_pasta', methods=['POST'])
-def api_flask_apagar_musicas():
+@app.route('/api/delete_music_folder', methods=['POST'])
+def api_flask_delete_music():
     try:
-        dados = request.get_json(force=True, silent=True) or {}
-        pasta = dados.get('pasta', '')
-        modo_batch = dados.get('modoBatch', False) # Agora recebe a escolha do utilizador
+        data = request.get_json(force=True, silent=True) or {}
+        folder = data.get('folder', data.get('pasta', ''))
+        batch_mode = data.get('batchMode', data.get('modoBatch', False))
         
-        print(f"\n[RECEIVED FROM BROWSER] Delete files in: {pasta} | Batch: {modo_batch}")
+        print(f"\n[RECEIVED FROM BROWSER] Delete files in: {folder} | Batch: {batch_mode}")
         
-        resultado = api_sistema.apagar_musicas_pasta(pasta, modo_batch)
-        return jsonify(resultado)
+        result = api_system.delete_music_folder(folder, batch_mode)
+        return jsonify(result)
         
     except Exception as e:
         print(f"[FLASK ERROR] Delete failed: {e}")
-        return jsonify({"status": "erro", "mensagem": f"❌ Server Error: {str(e)}"})
+        return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
 
-
-@app.route('/api/melhorar_musicas_locais', methods=['POST'])
-def api_flask_melhorar_musicas():
+@app.route('/api/enhance_local_music', methods=['POST'])
+def api_flask_enhance_music():
     try:
-        dados = request.get_json(force=True, silent=True) or {}
+        data = request.get_json(force=True, silent=True) or {}
         
-        # Puxando exatamente os nomes que o Javascript envia
-        pasta = dados.get('pasta', '')
-        modo_batch = dados.get('modoBatch', False)
-        lufs = dados.get('lufs', '-24')
-        opcoes = dados.get('opcoes', None) # <--- 1. CAPTURANDO AS OPÇÕES AQUI
+        folder = data.get('folder', data.get('pasta', ''))
+        batch_mode = data.get('batchMode', data.get('modoBatch', False))
+        lufs = data.get('lufs', '-24')
+        options = data.get('options', data.get('opcoes', None))
         
-        # Atualizei o print para mostrar no terminal o que foi recebido
-        print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {pasta} | Batch: {modo_batch} | LUFS: {lufs} | Opções: {opcoes}")
+        print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {folder} | Batch: {batch_mode} | LUFS: {lufs} | Options: {options}")
         
-        # 2. ADICIONANDO 'opcoes' COMO O QUARTO PARÂMETRO
-        resultado = api_sistema.melhorar_musicas_locais(pasta, modo_batch, lufs, opcoes)
-        return jsonify(resultado)
+        result = api_system.enhance_local_music(folder, batch_mode, lufs, options)
+        return jsonify(result)
         
     except Exception as e:
         print(f"[FLASK ERROR] Enhance failed: {e}")
-        return jsonify({"status": "erro", "mensagem": f"❌ Server Error: {str(e)}"})
+        return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
+    
+@app.route('/api/retry_item', methods=['POST'])
+def api_flask_retry_item():
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        index = data.get('index')
+        music = data.get('music')
+        folder = data.get('folder', '')
+        
+        api_system.retry_single_item(index, music, folder)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"[FLASK ERROR] Retry item failed: {e}")
+        return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
 
 # ========================================================
-
-def iniciar_servidor():
+# STARTUP & MAIN EXECUTION
+# ========================================================
+def start_server():
     app.run(host='127.0.0.1', port=5000, debug=False)
 
-def aplicativo_ja_esta_rodando():
-    """Tenta conectar na porta 5000. Se conseguir, é porque já tem uma instância do Themarr aberta."""
+def is_app_running():
+    """Tries to connect to port 5000. If successful, Themarr is already running."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # connect_ex retorna 0 se a conexão for bem sucedida (porta ocupada)
         return s.connect_ex(('127.0.0.1', 5000)) == 0
 
-def iniciar_flask_background():
-    #CHECAGEM DE INSTÂNCIA DUPLA
-    if aplicativo_ja_esta_rodando():
-        print("Uma instância do Themarr já está rodando. Fechando esta nova tentativa...")
+def start_flask_background():
+    if is_app_running():
+        print("An instance of Themarr is already running. Closing this new attempt...")
         sys.exit(0)
 
-    # Redireciona saídas para capturarmos os logs na nossa rota web
-    sys.stdout = RedirecionadorLog(sys.__stdout__)
+    sys.stdout = LogRedirector(sys.__stdout__)
     sys.stderr = sys.stdout
     
-    t = threading.Thread(target=iniciar_servidor)
+    t = threading.Thread(target=start_server)
     t.daemon = True
     t.start()
 
 if __name__ == '__main__':
     
-    iniciar_flask_background()
+    start_flask_background()
     
-    # Abre a janela clássica do PyWebView
-    janela = webview.create_window(
+    window = webview.create_window(
         "Themarr Manager", 
         "http://127.0.0.1:5000", 
-        js_api=api_sistema,
+        js_api=api_system,
         width=900, 
         height=750, 
         background_color='#1e1e1e'

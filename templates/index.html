@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Themarr</title>
+    <title>Themarr Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -11,11 +11,11 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
-        /* Remove setas do input number */
+        /* Remove arrows from number input */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
-        /* Efeito sutil ao arrastar o item da fila */
+        /* Subtle effect when dragging a queue item */
         .dragging { opacity: 0.5; border: 1px dashed #3b82f6; }
     </style>
 </head>
@@ -34,17 +34,17 @@
         <section class="mb-5">
             <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">1. Media Directory</h2>
             <div class="flex items-center gap-3 bg-neutral-800 border border-neutral-700 rounded-md p-1.5 shadow-sm">
-                <button onclick="escolherPasta()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
+                <button onclick="selectFolder()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0">
                     📂 Browse
                 </button>
-                <span id="pastaPath" class="text-neutral-400 text-sm truncate w-full px-2">No folder selected...</span>
+                <span id="folderPath" class="text-neutral-400 text-sm truncate w-full px-2">No folder selected...</span>
             </div>
             
             <div class="mt-2 flex gap-3 justify-end px-1">
-                <button onclick="abrirModalApagar()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
+                <button onclick="openDeleteModal()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
                     🗑️ Clear Folder
                 </button>
-                <button onclick="abrirModalEnhance()" class="text-xs text-neutral-500 hover:text-purple-400 transition-colors flex items-center gap-1.5 py-0.5">
+                <button onclick="openEnhanceModal()" class="text-xs text-neutral-500 hover:text-purple-400 transition-colors flex items-center gap-1.5 py-0.5">
                     ✨ Enhance Themes
                 </button>
             </div>
@@ -56,26 +56,26 @@
                 
                 <div class="grid grid-cols-2 gap-3">
                     <input type="text" id="linkInput" placeholder="YouTube URL" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
-                    <input type="text" id="nomeInput" placeholder="Track Name (e.g., Opening 1)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
+                    <input type="text" id="nameInput" placeholder="Track Name (e.g., Opening 1)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
                 </div>
                 
                 <div class="flex gap-3">
-                    <select id="destinoSelect" class="flex-grow bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors text-neutral-300">
+                    <select id="destinationSelect" class="flex-grow bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors text-neutral-300">
                         <option value="" class="bg-neutral-800 text-white">Select a folder first...</option>
                     </select>
 
                     <div class="flex items-center bg-neutral-900 border border-neutral-700 rounded-md overflow-hidden flex-shrink-0 h-[38px]">
                         <span class="text-xs text-neutral-500 font-bold px-2">LUFS:</span>
                         
-                        <button onclick="alterarVolume(-1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">-</button>
+                        <button onclick="changeVolume(-1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">-</button>
                         
-                        <input type="text" id="lufsInput" value="-24" oninput="validarDigitacaoLUFS(this)" 
+                        <input type="text" id="lufsInput" value="-24" oninput="validateLUFSInput(this)" 
                                class="w-10 h-full bg-transparent text-center text-sm focus:outline-none font-bold text-white border-x border-neutral-700/70">
                         
-                        <button onclick="alterarVolume(1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">+</button>
+                        <button onclick="changeVolume(1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">+</button>
                     </div>
 
-                    <button onclick="adicionarNaFila()" class="bg-neutral-700 hover:bg-neutral-600 text-white px-6 py-2 rounded-md text-sm font-bold transition-colors flex-shrink-0 border border-neutral-600 h-[38px]">
+                    <button onclick="addToQueue()" class="bg-neutral-700 hover:bg-neutral-600 text-white px-6 py-2 rounded-md text-sm font-bold transition-colors flex-shrink-0 border border-neutral-600 h-[38px]">
                         ➕ Add
                     </button>
                 </div>
@@ -84,13 +84,13 @@
 
         <section class="mb-5 flex-grow flex flex-col">
             <h2 class="text-sm font-semibold text-neutral-400 mb-2 uppercase tracking-wider">3. Processing Queue</h2>
-            <div id="filaContainer" class="bg-neutral-900/80 border border-neutral-700 rounded-md p-2 h-40 overflow-y-auto space-y-2 flex-grow">
+            <div id="queueContainer" class="bg-neutral-900/80 border border-neutral-700 rounded-md p-2 h-40 overflow-y-auto space-y-2 flex-grow">
                 <div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>
             </div>
         </section>
 
         <div class="mt-auto">
-            <button id="btnStart" onclick="iniciarProcessamento()" class="w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors">
+            <button id="btnStart" onclick="startProcessing()" class="w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors">
                 ▶ START PROCESSING
             </button>
 
@@ -112,7 +112,7 @@ System ready. Awaiting tasks...
         </div>
     </div>
 
-    <div id="settingsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity">
+<div id="settingsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity">
         <div class="bg-neutral-800 rounded-lg shadow-2xl border border-neutral-700 p-5 w-full max-w-sm">
             <div class="flex justify-between items-center mb-5">
                 <h2 class="text-lg font-bold">⚙️ Settings</h2>
@@ -120,18 +120,18 @@ System ready. Awaiting tasks...
             </div>
             <div class="space-y-3 text-sm">
                 <label class="flex items-center gap-2 cursor-pointer mb-2">
-                    <input type="checkbox" id="jellyfinCheck" onchange="salvarConfigsAuto()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                    <input type="checkbox" id="jellyfinCheck" onchange="saveAutoSettings()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                     <span class="font-medium">Fetch Metadata from Jellyfin</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer mt-4 mb-2 pt-3 border-t border-neutral-700">
-                    <input type="checkbox" id="openBrowserCheck" onchange="salvarConfigsAuto()" checked class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                    <input type="checkbox" id="openBrowserCheck" onchange="saveAutoSettings()" checked class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                     <span class="font-medium text-neutral-300">Open browser automatically (Server Mode)</span>
                 </label>
-                <input type="text" id="jellyUrl" onchange="salvarConfigsAuto()" placeholder="Jellyfin URL (e.g., http://192.168.1.100:8096)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
-                <input type="password" id="jellyApi" onchange="salvarConfigsAuto()" placeholder="API Key" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+                <input type="text" id="jellyUrl" onchange="saveAutoSettings()" placeholder="Jellyfin URL (e.g., http://192.168.1.100:8096)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
+                <input type="password" id="jellyApi" onchange="saveAutoSettings()" placeholder="API Key" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500">
                 <p id="apiStatus" class="text-xs h-4"></p>
 
-                <button onclick="testarConexao()" id="btnTest" class="w-full bg-neutral-700 hover:bg-neutral-600 text-white py-2 rounded-md transition-colors font-medium">
+                <button onclick="testConnection()" id="btnTest" class="w-full bg-neutral-700 hover:bg-neutral-600 text-white py-2 rounded-md transition-colors font-medium">
                     🔄 Test Connection
                 </button>
 
@@ -149,15 +149,15 @@ System ready. Awaiting tasks...
                 Choose the scope of the deletion. This action will permanently remove .mp3 files.
             </p>
             <div class="flex flex-col gap-2 text-xs">
-                <button onclick="confirmarApagar(false)" class="bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
+                <button onclick="confirmDelete(false)" class="bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
                     <span><strong>1. Current Media Only</strong></span>
                     <span class="text-neutral-500">Selected folder</span>
                 </button>
-                <button onclick="confirmarApagar(true)" class="bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 text-red-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
+                <button onclick="confirmDelete(true)" class="bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 text-red-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
                     <span><strong>2. Batch Mode (ALL MEDIAS)</strong></span>
                     <span class="opacity-70">Entire Library</span>
                 </button>
-                <button onclick="fecharModalApagar()" class="text-neutral-400 hover:text-neutral-200 px-3 py-2 mt-2 text-center rounded transition-colors">
+                <button onclick="closeDeleteModal()" class="text-neutral-400 hover:text-neutral-200 px-3 py-2 mt-2 text-center rounded transition-colors">
                     Cancel
                 </button>
             </div>
@@ -172,96 +172,104 @@ System ready. Awaiting tasks...
     </div>
 
     <div id="enhanceModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 animate-fade-in">
-    <div class="bg-[#2d2d2d] rounded-xl p-6 w-96 border border-gray-700 shadow-2xl">
-        <h3 class="text-xl font-bold mb-2 text-blue-400 flex items-center gap-2">
-            ✨ Enhance Library
-        </h3>
-        <p class="text-gray-400 text-xs mb-5">Select which operations you want to perform:</p>
-        
-        <div class="space-y-3 mb-6">
-            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
-                <input type="checkbox" id="chkNormalize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
-                <div>
-                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Normalize Audio</span>
-                    <span class="block text-[11px] text-gray-400">Analyze and adjust volume to standard LUFS levels.</span>
-                </div>
-            </label>
+        <div class="bg-[#2d2d2d] rounded-xl p-6 w-96 border border-gray-700 shadow-2xl">
+            <h3 class="text-xl font-bold mb-2 text-blue-400 flex items-center gap-2">
+                ✨ Enhance Library
+            </h3>
+            <p class="text-gray-400 text-xs mb-5">Select which operations you want to perform:</p>
             
-            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
-                <input type="checkbox" id="chkMetadata" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
-                <div>
-                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Embed Metadata & Artwork</span>
-                    <span class="block text-[11px] text-gray-400">Inject official titles, artist tags, and cover posters.</span>
-                </div>
-            </label>
+            <div class="space-y-3 mb-6">
+                <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                    <input type="checkbox" id="chkNormalize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                    <div>
+                        <span class="block font-medium text-gray-200 group-hover:text-white transition">Normalize Audio</span>
+                        <span class="block text-[11px] text-gray-400">Analyze and adjust volume to standard LUFS levels.</span>
+                    </div>
+                </label>
+                
+                <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                    <input type="checkbox" id="chkMetadata" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                    <div>
+                        <span class="block font-medium text-gray-200 group-hover:text-white transition">Embed Metadata & Artwork</span>
+                        <span class="block text-[11px] text-gray-400">Inject official titles, artist tags, and cover posters.</span>
+                    </div>
+                </label>
+                
+                <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                    <input type="checkbox" id="chkOrganize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                    <div>
+                        <span class="block font-medium text-gray-200 group-hover:text-white transition">Organize Folder Structure</span>
+                        <span class="block text-[11px] text-gray-400">Automatically group loose media into 'Season 01' folders.</span>
+                    </div>
+                </label>
+            </div>
             
-            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
-                <input type="checkbox" id="chkOrganize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
-                <div>
-                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Organize Folder Structure</span>
-                    <span class="block text-[11px] text-gray-400">Automatically group loose media into 'Season 01' folders.</span>
+            <div class="flex flex-col gap-2">
+                <div class="flex gap-2">
+                    <button onclick="triggerEnhance('this')" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
+                        This Folder
+                    </button>
+                    <button onclick="triggerEnhance('all')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
+                        All Folders
+                    </button>
                 </div>
-            </label>
-        </div>
-        
-        <div class="flex flex-col gap-2">
-            <div class="flex gap-2">
-                <button onclick="dispararEnhance('this')" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
-                    This Folder
-                </button>
-                <button onclick="dispararEnhance('all')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
-                    All Folders
+                <button onclick="closeEnhanceModal()" class="text-gray-400 hover:text-gray-200 text-xs mt-2 text-center transition underline">
+                    Cancel
                 </button>
             </div>
-            <button onclick="fecharModalEnhance()" class="text-gray-400 hover:text-gray-200 text-xs mt-2 text-center transition underline">
-                Cancel
-            </button>
         </div>
     </div>
-</div>
 
     <script>
         // ===================================================================
-        // MÁGICA GLOBAL (V2): Cria um pywebview falso se rodar no navegador
+        // GLOBAL MAGIC (V2): Creates a fake pywebview if running in the browser
         // ===================================================================
         setTimeout(() => {
             if (!window.pywebview || !window.pywebview.api) {
-                console.log("🌐 Modo Navegador detectado! Ativando backend Flask.");
+                console.log("🌐 Browser Mode detected! Activating Flask backend.");
                 
                 window.pywebview = {
                     api: {
-                        selecionar_pasta: async () => {
-                            let res = await fetch('/api/selecionar_pasta', { method: 'POST' });
+                        select_folder: async () => {
+                            let res = await fetch('/api/select_folder', { method: 'POST' });
                             return await res.json();
                         },
-                        obter_configuracoes: async () => {
-                            let res = await fetch('/api/obter_configuracoes');
+                        get_settings: async () => {
+                            let res = await fetch('/api/get_settings');
                             return await res.json();
                         },
-                        salvar_configuracoes: async (dados) => {
-                            await fetch('/api/salvar_configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) });
+                        save_settings: async (data) => {
+                            await fetch('/api/save_settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
                         },
-                        processar_fila: async (fila, pasta) => {
-                            await fetch('/api/processar_fila', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fila: fila, pasta: pasta }) });
+                        process_queue: async (queueData, folder) => {
+                            await fetch('/api/process_queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ queue: queueData, folder: folder }) });
                         },
-                        obter_status: async () => {
+                        get_status: async () => {
                             let res = await fetch('/api/status');
                             return await res.json();
                         },
-                        apagar_musicas_pasta: async (pasta, modoBatch) => {
-                            let res = await fetch('/api/apagar_musicas_pasta', { 
+                        delete_music_folder: async (folder, batchMode) => {
+                            let res = await fetch('/api/delete_music_folder', { 
                                 method: 'POST', 
                                 headers: { 'Content-Type': 'application/json' }, 
-                                body: JSON.stringify({ pasta: pasta, modoBatch: modoBatch }) 
+                                body: JSON.stringify({ folder: folder, batchMode: batchMode }) 
                             });
                             return await res.json();
                         },
-                        melhorar_musicas_locais: async (pasta, modoBatch, lufs) => {
-                            let res = await fetch('/api/melhorar_musicas_locais', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pasta: pasta, modoBatch: modoBatch, lufs: lufs }) });
+                        enhance_local_music: async (folder, batchMode, lufs, options) => {
+                            let res = await fetch('/api/enhance_local_music', { 
+                                method: 'POST', 
+                                headers: { 'Content-Type': 'application/json' }, 
+                                body: JSON.stringify({ folder: folder, batchMode: batchMode, lufs: lufs, options: options }) 
+                            });
                             return await res.json();
                         },
-                        testar_jellyfin: async (url, api) => {
-                            let res = await fetch('/api/testar_jellyfin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, api_key: api }) });
+                        test_jellyfin: async (url, api_key) => {
+                            let res = await fetch('/api/test_jellyfin', { 
+                                method: 'POST', 
+                                headers: { 'Content-Type': 'application/json' }, 
+                                body: JSON.stringify({ url: url, api_key: api_key }) 
+                            });
                             return await res.json();
                         }
                     }
@@ -270,27 +278,26 @@ System ready. Awaiting tasks...
             }
         }, 500);
 
-        function abrirModalApagar() {
-            const pasta = document.getElementById('pastaPath').innerText; 
-            if (pasta === "No folder selected..." || pasta.trim() === "") {
-                // AQUI ESTAVA O ALERT FEIO. AGORA USA O TOAST BONITO!
-                mostrarToast("Please select a Media Directory first!", "erro");
+        function openDeleteModal() {
+            const folder = document.getElementById('folderPath').innerText; 
+            if (folder === "No folder selected..." || folder.trim() === "") {
+                showToast("Please select a Media Directory first!", "error");
                 return;
             }
             document.getElementById('deleteModal').classList.remove('hidden');
         }
 
-        function fecharModalApagar() {
+        function closeDeleteModal() {
             document.getElementById('deleteModal').classList.add('hidden');
         }
 
-        function mostrarToast(mensagem, status) {
+        function showToast(message, status) {
             const toast = document.getElementById('toastNotification');
             const toastMsg = document.getElementById('toastMessage');
             const toastIcon = document.getElementById('toastIcon');
             
-            toastMsg.innerText = mensagem;
-            toastIcon.innerText = status === 'sucesso' ? '✅' : '❌';
+            toastMsg.innerText = message;
+            toastIcon.innerText = status === 'success' || status === 'sucesso' ? '✅' : '❌';
             
             toast.classList.remove('hidden');
             setTimeout(() => {
@@ -303,121 +310,105 @@ System ready. Awaiting tasks...
             }, 3500);
         }
 
-        function confirmarApagar(modoBatch) {
-            // DOUBLE CHECK DE SEGURANÇA (Agora usando "Media" de forma genérica)
-            if (modoBatch) {
+        function confirmDelete(batchMode) {
+            if (batchMode) {
                 let doubleCheck = confirm(
                     "⚠️ DOUBLE CHECK WARNING ⚠️\n\n" +
                     "You are about to permanently delete ALL audio files from ALL MEDIA in the library.\n" +
                     "Are you absolutely sure you want to proceed?"
                 );
                 if (!doubleCheck) {
-                    fecharModalApagar();
+                    closeDeleteModal();
                     return; 
                 }
             } else {
                 let singleCheck = confirm("Proceed with deleting audio files from the CURRENT MEDIA only?");
                 if (!singleCheck) {
-                    fecharModalApagar();
+                    closeDeleteModal();
                     return;
                 }
             }
 
-            // Se passou pelos checks, fecha o modal e manda o comando
-            fecharModalApagar();
-            const pasta = document.getElementById('pastaPath').innerText;
-            mostrarToast("🗑️ Deleting files...", "sucesso");
+            closeDeleteModal();
+            const folder = document.getElementById('folderPath').innerText;
+            showToast("🗑️ Deleting files...", "success");
 
             if(window.pywebview) {
-                // Envia a pasta e a escolha (modoBatch: true ou false) para o Python
-                pywebview.api.apagar_musicas_pasta(pasta, modoBatch).then(res => {
-                    mostrarToast(res.mensagem, res.status);
+                pywebview.api.delete_music_folder(folder, batchMode).then(res => {
+                    showToast(res.message || res.mensagem, res.status);
                 });
             }
         }
 
-        function abrirModalEnhance() {
-            const pasta = document.getElementById('pastaPath').innerText; 
-            if (pasta === "No folder selected..." || pasta.trim() === "") {
-                mostrarToast("Please select a Media Directory first!", "erro");
+        function openEnhanceModal() {
+            const folder = document.getElementById('folderPath').innerText; 
+            if (folder === "No folder selected..." || folder.trim() === "") {
+                showToast("Please select a Media Directory first!", "error");
                 return;
             }
             document.getElementById('enhanceModal').classList.remove('hidden');
         }
 
-        function fecharModalEnhance() {
+        function closeEnhanceModal() {
             document.getElementById('enhanceModal').classList.add('hidden');
         }
 
-        async function dispararEnhance(scope) {
-            // 1. Fecha o modal
-            fecharModalEnhance();
+        async function triggerEnhance(scope) {
+            closeEnhanceModal();
             
-            // 2. Pega as variáveis principais (Pasta e LUFS)
-            const pasta = document.getElementById('pastaPath').innerText;
-            const lufsAtual = document.getElementById('lufsInput').value;
-            const modoBatch = (scope === 'all'); // Se o botão clicado foi 'all', vira true
+            const folder = document.getElementById('folderPath').innerText;
+            // CORREÇÃO CRÍTICA: Forçamos o valor do LUFS a ser um Número Inteiro
+            const currentLufs = parseInt(document.getElementById('lufsInput').value) || -24; 
+            const batchMode = (scope === 'all'); 
             
-            // 3. Captura o estado dos checkboxes
-            const opcoes = {
+            const options = {
                 normalize: document.getElementById('chkNormalize').checked,
                 metadata: document.getElementById('chkMetadata').checked,
                 organize: document.getElementById('chkOrganize').checked
             };
     
-            mostrarToast("⏳ Processing audio... This might take a while.", "sucesso");
+            showToast("⏳ Processing audio... This might take a while.", "success");
     
-            // 4. Envia TUDO para o backend de forma híbrida
             try {
                 if (window.pywebview && window.pywebview.api) {
-                    // Modo Desktop
-                    pywebview.api.melhorar_musicas_locais(pasta, modoBatch, lufsAtual, opcoes).then(res => {
-                        mostrarToast(res.mensagem, res.status);
+                    window.pywebview.api.enhance_local_music(folder, batchMode, currentLufs, options)
+                    .then(res => {
+                        showToast(res.message || res.mensagem, res.status);
+                    })
+                    .catch(err => {
+                        console.error("Enhance Python Error:", err);
+                        showToast("❌ Server Error (Check Terminal)", "error");
                     });
-                } else {
-                    // Modo Servidor (Flask)
-                    let res = await fetch('/api/melhorar_musicas_locais', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            pasta: pasta, 
-                            modoBatch: modoBatch, 
-                            lufs: lufsAtual,
-                            opcoes: opcoes 
-                        })
-                    });
-                    let data = await res.json();
-                    mostrarToast(data.mensagem, data.status);
                 }
             } catch (error) {
-                console.error("Erro ao iniciar o Enhance:", error);
-                mostrarToast("❌ Failed to start process.", "erro");
+                console.error("Error starting Enhance:", error);
+                showToast("❌ Failed to start process.", "error");
             }
         }
 
-        let filaMusicas = []; 
-        let opcoesDestinoGlobais = [];
+        let musicQueue = []; 
+        let globalDestinationOptions = [];
         let dragStartIndex = null; 
         let isProcessing = false; 
         let isCompleted = false; 
 
         function toggleModal(modalID) { document.getElementById(modalID).classList.toggle("hidden"); }
 
-        function alterarVolume(delta) {
+        function changeVolume(delta) {
             let input = document.getElementById('lufsInput');
-            let valorAtual = parseInt(input.value) || 0;
-            let novoValor = valorAtual + delta;
-            if(novoValor > 0) novoValor = 0; 
-            if(novoValor < -70) novoValor = -70; 
-            input.value = novoValor;
-            salvarConfigsAuto();
+            let currentValue = parseInt(input.value) || 0;
+            let newValue = currentValue + delta;
+            if(newValue > 0) newValue = 0; 
+            if(newValue < -70) newValue = -70; 
+            input.value = newValue;
+            saveAutoSettings();
         }
         
-        function validarDigitacaoLUFS(input) {
+        function validateLUFSInput(input) {
             if (input.value === "" || input.value === "-") return;
-            let valor = parseInt(input.value);
-            if (isNaN(valor) || valor > 0) input.value = "0";
-            salvarConfigsAuto();
+            let value = parseInt(input.value);
+            if (isNaN(value) || value > 0) input.value = "0";
+            saveAutoSettings();
         }
 
         function toggleLog() {
@@ -432,33 +423,32 @@ System ready. Awaiting tasks...
             }
         }
 
-        function adicionarTextoLog(texto) {
+        function addLogText(text) {
             const container = document.getElementById('logContainer');
-            container.innerText += texto;
+            container.innerText += text;
             container.scrollTop = container.scrollHeight;
         }
 
         // ===================================================================
-        // SISTEMA CENTRAL DE MONITORIZAÇÃO (POLLING) - 100% HÍBRIDO
+        // CENTRAL MONITORING SYSTEM (POLLING)
         // ===================================================================
         setInterval(async () => {
             if (!window.pywebview || !window.pywebview.api) return;
 
             try {
-                let data = await pywebview.api.obter_status();
+                let data = await window.pywebview.api.get_status();
 
                 if (data.logs && data.logs.trim() !== "") {
-                    adicionarTextoLog(data.logs);
+                    addLogText(data.logs);
                 }
 
-                // CORREÇÃO VISUAL: Só atualiza a barra global se estiver de fato processando
-                if (data.porcentagem !== undefined && isProcessing) {
-                    window.atualizarProgressoGlobal(data.porcentagem, data.textoStatus, data.textoPorcentagem);
+                if (data.percentage !== undefined && isProcessing) {
+                    window.updateGlobalProgress(data.percentage, data.statusText || data.textoStatus, data.percentageText || data.textoPorcentagem);
                 }
                 
-                if (data.itens_status) {
-                    data.itens_status.forEach((status_item, index) => {
-                        window.atualizarStatusItem(index, status_item);
+                if (data.item_statuses && (isProcessing || data.is_processing)) {
+                    data.item_statuses.forEach((status_item, index) => {
+                        window.updateItemStatus(index, status_item);
                     });
                 }
 
@@ -466,19 +456,19 @@ System ready. Awaiting tasks...
                     isProcessing = true;
                 } else if (isProcessing && !data.is_processing) {
                     isProcessing = false;
-                    window.finalizarProcessamentoUI();
+                    window.finalizeProcessingUI();
                 }
 
             } catch (e) {
-                // Silencioso
+                // Silent catch
             }
         }, 500);
 
-        function escolherPasta() {
+        function selectFolder() {
             if(isProcessing) return; 
             
             if(isCompleted) {
-                filaMusicas = [];
+                musicQueue = [];
                 isCompleted = false;
                 document.getElementById('progressBar').style.width = "0%";
                 document.getElementById('percentText').innerText = "0%";
@@ -488,76 +478,79 @@ System ready. Awaiting tasks...
                 btnStart.innerText = "▶ START PROCESSING";
                 btnStart.disabled = true;
                 document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
-                atualizarFilaUI();
+                updateQueueUI();
             }
 
             if(window.pywebview) {
-                pywebview.api.selecionar_pasta().then(resposta => {
-                    if(resposta.sucesso) {
-                        document.getElementById('pastaPath').innerText = resposta.caminho;
-                        opcoesDestinoGlobais = ['Main Theme'];
-                        if(resposta.temporadas.length === 0) {
-                            let nomePasta = resposta.caminho.split('\\').pop().split('/').pop();
-                            opcoesDestinoGlobais.push(`Season 01. ${nomePasta}`);
+                window.pywebview.api.select_folder().then(response => {
+                    if(response.success || response.sucesso) {
+                        let returnedPath = response.path || response.caminho;
+                        document.getElementById('folderPath').innerText = returnedPath;
+                        globalDestinationOptions = ['Main Theme'];
+                        
+                        let returnedSeasons = response.seasons || response.temporadas || [];
+                        if(returnedSeasons.length === 0) {
+                            let folderName = returnedPath.split('\\').pop().split('/').pop();
+                            globalDestinationOptions.push(`Season 01. ${folderName}`);
                         } else {
-                            opcoesDestinoGlobais.push(...resposta.temporadas);
+                            globalDestinationOptions.push(...returnedSeasons);
                         }
-                        atualizarDropdownPrincipal();
+                        updateMainDropdown();
                     }
                 });
-            } else { alert("Conecte ao Python primeiro."); }
+            } else { alert("Connect to Python first."); }
         }
 
-        function atualizarDropdownPrincipal() {
-            const select = document.getElementById('destinoSelect');
+        function updateMainDropdown() {
+            const select = document.getElementById('destinationSelect');
             select.innerHTML = '';
-            opcoesDestinoGlobais.forEach(op => {
+            globalDestinationOptions.forEach(op => {
                 select.innerHTML += `<option value="${op}" class="bg-neutral-800 text-white">${op}</option>`;
             });
         }
 
-        function adicionarNaFila() {
+        function addToQueue() {
             if(isProcessing) return; 
             
             if(isCompleted) {
                 isCompleted = false;
-                filaMusicas = [];
+                musicQueue = [];
                 document.getElementById('progressBar').style.width = "0%";
                 document.getElementById('percentText').innerText = "0%";
                 document.getElementById('statusText').innerText = "Ready";
                 document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
-                atualizarFilaUI();
+                updateQueueUI();
             }
 
             const link = document.getElementById('linkInput').value.trim();
-            const nome = document.getElementById('nomeInput').value.trim();
-            const destino = document.getElementById('destinoSelect').value;
+            const name = document.getElementById('nameInput').value.trim();
+            const destination = document.getElementById('destinationSelect').value;
             const lufs = document.getElementById('lufsInput').value;
-            const pathTxt = document.getElementById('pastaPath').innerText;
+            const pathTxt = document.getElementById('folderPath').innerText;
 
             if(!link || (!link.startsWith("https://") && !link.startsWith("http://"))) {
-                alert("Invalid URL format! The address must start with 'http://' or 'https://'.");
+                showToast("Invalid URL format! The address must start with 'http://' or 'https://'.");
                 return;
             }
-            if(!nome) { alert("Please enter a track name!"); return; }
-            if(!destino || destino === "") { alert("Please select a target folder!"); return; }
-            if(pathTxt === "No folder selected...") { alert("Please browse for an media folder first!"); return; }
+            if(!name) { showToast("Please enter a track name!"); return; }
+            if(!destination || destination === "") { showToast("Please select a target folder!"); return; }
+            if(pathTxt === "No folder selected...") { showToast("Please browse for a media folder first!"); return; }
 
-            filaMusicas.push({ link, nome, destino, lufs, status: 'pendente' });
+            musicQueue.push({ link: link, name: name, destination: destination, lufs: lufs, status: 'pending' });
             
             document.getElementById('linkInput').value = "";
-            document.getElementById('nomeInput').value = "";
-            atualizarFilaUI();
+            document.getElementById('nameInput').value = "";
+            updateQueueUI();
         }
 
-        function removerDaFila(index) {
+        function removeFromQueue(index) {
             if(isProcessing) return;
-            filaMusicas.splice(index, 1);
-            atualizarFilaUI();
+            musicQueue.splice(index, 1);
+            updateQueueUI();
         }
 
-        function editarNomeFila(index, novoNome) { filaMusicas[index].nome = novoNome; }
-        function editarDestinoFila(index, novoDestino) { filaMusicas[index].destino = novoDestino; }
+        function editQueueName(index, newName) { musicQueue[index].name = newName; }
+        function editQueueDestination(index, newDestination) { musicQueue[index].destination = newDestination; }
 
         function dragStart(index, event) {
             if(isProcessing) return;
@@ -568,19 +561,19 @@ System ready. Awaiting tasks...
         function dragOver(event) { if(!isProcessing) event.preventDefault(); }
         function drop(index) {
             if (isProcessing || dragStartIndex === null || dragStartIndex === index) return;
-            const itemArrastado = filaMusicas.splice(dragStartIndex, 1)[0];
-            filaMusicas.splice(index, 0, itemArrastado);
+            const draggedItem = musicQueue.splice(dragStartIndex, 1)[0];
+            musicQueue.splice(index, 0, draggedItem);
             dragStartIndex = null;
-            atualizarFilaUI();
+            updateQueueUI();
         }
 
-        function atualizarFilaUI() {
-            const container = document.getElementById('filaContainer');
+        function updateQueueUI() {
+            const container = document.getElementById('queueContainer');
             const btnStart = document.getElementById('btnStart');
 
-            if(filaMusicas.length === 0) {
+            if (musicQueue.length === 0) {
                 container.innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
-                if(!isCompleted) {
+                if (!isCompleted) {
                     btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
                     btnStart.disabled = true;
                     btnStart.innerText = "▶ START PROCESSING";
@@ -588,71 +581,119 @@ System ready. Awaiting tasks...
                 return;
             }
 
-            if(!isProcessing && !isCompleted) {
+            if (!isProcessing && !isCompleted) {
                 btnStart.className = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
                 btnStart.disabled = false;
                 btnStart.innerText = "▶ START PROCESSING";
             }
 
             container.innerHTML = "";
-            filaMusicas.forEach((item, index) => {
+            musicQueue.forEach((item, index) => {
                 let optionsHTML = '';
-                opcoesDestinoGlobais.forEach(op => {
-                    let selecionado = (op === item.destino) ? 'selected' : '';
-                    optionsHTML += `<option value="${op}" class="bg-neutral-800 text-white" ${selecionado}>${op}</option>`;
+                globalDestinationOptions.forEach(op => {
+                    let selected = (op === item.destination) ? 'selected' : '';
+                    optionsHTML += `<option value="${op}" class="bg-neutral-800 text-white" ${selected}>${op}</option>`;
                 });
 
                 let statusIcon = "";
-                let itemOpacidade = "";
-                if(item.status === 'processando') {
+                let itemOpacity = "";
+                if (item.status === 'processing' || item.status === 'processando') {
                     statusIcon = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
-                } else if(item.status === 'concluido') {
+                } else if (item.status === 'completed' || item.status === 'concluido') {
                     statusIcon = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
-                    itemOpacidade = "opacity-60"; 
-                } else if(item.status === 'erro') {
-                    statusIcon = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
-                    itemOpacidade = "opacity-60 text-red-400"; 
+                    itemOpacity = "opacity-60"; 
+                } else if (item.status === 'error' || item.status === 'erro') {
+                    // === BLOCO COM HOVER E BOTÃO RETRY INSERIDO AQUI ===
+                    statusIcon = `
+                        <div class="group relative flex items-center justify-center w-6 h-6 ml-1">
+                            <span class="block group-hover:hidden text-red-500 font-bold text-xs select-none">❌</span>
+                            <button onclick="retrySingleQueueItem(${index})" 
+                                    class="hidden group-hover:flex items-center justify-center text-blue-400 hover:text-blue-300 transition-colors" 
+                                    title="Retry Task">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 animate-pulse">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                            </button>
+                        </div>
+                    `;
+                    itemOpacity = "opacity-60 text-red-400"; 
                 }
 
                 let pointerState = isProcessing ? "pointer-events-none" : "";
                 let dragEnable = isProcessing ? "false" : "true";
                 let cursorState = isProcessing ? "cursor-default" : "cursor-move";
 
-                // ADICIONADOS IDENTIFICADORES id, data-status E CLASSE CORRETOS
-                const filaItemHTML = `
-                <div id="fila-item-${index}" data-status="${item.status}" draggable="${dragEnable}" 
+                const queueItemHTML = `
+                <div id="queue-item-${index}" data-status="${item.status}" draggable="${dragEnable}" 
                      ondragstart="dragStart(${index}, event)" 
                      ondragend="dragEnd(event)"
                      ondragover="dragOver(event)" 
                      ondrop="drop(${index})"
-                     class="group flex items-center justify-between bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 p-2 rounded text-sm transition-colors ${cursorState} ${itemOpacidade}">
+                     class="group flex items-center justify-between bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 p-2 rounded text-sm transition-colors ${cursorState} ${itemOpacity}">
                     
                     ${!isProcessing ? '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>' : ''}
                     
                     <div class="status-icon flex items-center">${statusIcon}</div>
 
-                    <input type="text" value="${item.nome}" onchange="editarNomeFila(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                    <input type="text" value="${item.name}" onchange="editQueueName(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
                            class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
                     
-                    <select onchange="editarDestinoFila(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                    <select onchange="editQueueDestination(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
                             class="bg-transparent text-neutral-400 text-xs focus:outline-none cursor-pointer w-1/4 px-1 appearance-none hover:text-neutral-300 ${pointerState}">
                         ${optionsHTML}
                     </select>
                     
                     <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${item.link}</span>
                     
-                    ${!isProcessing ? `<button onclick="removerDaFila(${index})" class="text-neutral-500 hover:text-red-400 font-bold ml-1 opacity-0 group-hover:opacity-100 transition-opacity px-2 cursor-pointer">✕</button>` : ''}
+                    ${!isProcessing ? `<button onclick="removeFromQueue(${index})" class="text-neutral-500 hover:text-red-400 font-bold ml-1 opacity-0 group-hover:opacity-100 transition-opacity px-2 cursor-pointer">✕</button>` : ''}
                 </div>
                 `;
-                container.innerHTML += filaItemHTML;
+                container.innerHTML += queueItemHTML;
             });
         }
 
-        function iniciarProcessamento() {
-            // CORREÇÃO DO RESET: Zera tudo corretamente e apaga o filaContainer
+        function retrySingleQueueItem(index) {
+            const music = musicQueue[index]; 
+            if (!music) return;
+            
+            const mainCount = musicQueue.filter(m => m.destination === 'Main Theme').length;
+            music.has_multi_main = mainCount > 1;
+
+            const folderPath = document.getElementById('folderPath').innerText;
+            if (!folderPath || folderPath === "No folder selected...") {
+                showToast("❌ Please select a valid folder first.", "error");
+                return;
+            }
+
+            fetch('/api/retry_item', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    index: index,
+                    music: music,
+                    folder: folderPath
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log(`[SYSTEM] Sent retry command for item index: ${index}`);
+                } else {
+                    console.error('[ERROR] Failed to execute retry action:', data.message);
+                    showToast("❌ Failed to initiate retry process.", "error");
+                }
+            })
+            .catch(err => {
+                console.error('[ERROR] Network exception communicating with server:', err);
+            });
+        }
+
+        function startProcessing() {
             if (isCompleted) {
-                filaMusicas = [];
-                document.getElementById('filaContainer').innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
+                musicQueue = [];
+                document.getElementById('queueContainer').innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
                 
                 document.getElementById('progressBar').style.width = "0%";
                 document.getElementById('percentText').innerText = "0%";
@@ -667,7 +708,7 @@ System ready. Awaiting tasks...
                 return;
             }
 
-            if(filaMusicas.length === 0 || isProcessing) return;
+            if(musicQueue.length === 0 || isProcessing) return;
 
             isProcessing = true;
             isCompleted = false;
@@ -677,138 +718,121 @@ System ready. Awaiting tasks...
             btnStart.innerHTML = `<svg class="animate-spin h-4 w-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> PROCESSING...`;
             btnStart.disabled = true;
 
-            const pastaPrincipal = document.getElementById('pastaPath').innerText.trim();
-            if (!pastaPrincipal || pastaPrincipal === "No folder selected...") {
-                 alert("Selecione um diretório primeiro!");
+            const mainFolder = document.getElementById('folderPath').innerText.trim();
+            if (!mainFolder || mainFolder === "No folder selected...") {
+                 alert("Please select a directory first!");
                  isProcessing = false;
-                 atualizarFilaUI();
+                 updateQueueUI();
                  return;
             }
 
-            pywebview.api.processar_fila(filaMusicas, pastaPrincipal).catch(err => {
-                console.error("Erro ao iniciar fila:", err);
+            window.pywebview.api.process_queue(musicQueue, mainFolder).catch(err => {
+                console.error("Error starting queue:", err);
             });
         }
 
-        window.atualizarProgressoGlobal = function(porcentagem, textoStatus, textoPorcentagem) {
-            document.getElementById('progressBar').style.width = porcentagem + "%";
-            document.getElementById('percentText').innerText = textoPorcentagem || (porcentagem + "%");
-            document.getElementById('statusText').innerText = textoStatus;
+        window.updateGlobalProgress = function(percentage, statusText, percentageText) {
+            document.getElementById('progressBar').style.width = percentage + "%";
+            document.getElementById('percentText').innerText = percentageText || (percentage + "%");
+            document.getElementById('statusText').innerText = statusText;
         };
 
-        // CORREÇÃO DOS ÍCONES: Variáveis corrigidas de status para novoStatus + manipulação correta das classes
-        window.atualizarStatusItem = function(index, novoStatus) {
-            let item = document.getElementById(`fila-item-${index}`);
+        window.updateItemStatus = function(index, newStatus) {
+            let item = document.getElementById(`queue-item-${index}`);
             if(!item) return;
 
-            let statusAtual = item.getAttribute('data-status') || 'pendente';
-            if (statusAtual === novoStatus) return; 
+            let currentStatus = item.getAttribute('data-status') || 'pending';
+            if (currentStatus === newStatus) return; 
 
-            item.setAttribute('data-status', novoStatus);
+            item.setAttribute('data-status', newStatus);
             
             let statusDiv = item.querySelector('.status-icon');
             if(!statusDiv) return;
 
-            if(novoStatus === 'processando') {
+            if(newStatus === 'processing' || newStatus === 'processando') {
                 statusDiv.innerHTML = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
                 item.classList.remove('opacity-60', 'text-red-400');
                 item.classList.add('opacity-100');
-            } else if(novoStatus === 'concluido') {
+            } else if(newStatus === 'completed' || newStatus === 'concluido') {
                 statusDiv.innerHTML = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
                 item.classList.remove('opacity-100', 'text-red-400');
                 item.classList.add('opacity-60');
-                if(filaMusicas[index]) filaMusicas[index].status = 'concluido';
-            } else if(novoStatus === 'erro') {
+                if(musicQueue[index]) musicQueue[index].status = 'completed';
+            } else if(newStatus === 'error' || newStatus === 'erro') {
                 statusDiv.innerHTML = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
                 item.classList.remove('opacity-100');
                 item.classList.add('opacity-60', 'text-red-400');
-                if(filaMusicas[index]) filaMusicas[index].status = 'erro';
+                if(musicQueue[index]) musicQueue[index].status = 'error';
             }
         };
 
-        window.finalizarProcessamentoUI = function() {
+        window.finalizeProcessingUI = function() {
             isProcessing = false;
             isCompleted = true; 
             
-            // Força a barra para 100% no final de forma fixa e visual
-            window.atualizarProgressoGlobal(100, "All Done!", "100%");
+            window.updateGlobalProgress(100, "All Done!", "100%");
             
             const btnStart = document.getElementById('btnStart');
             btnStart.className = "w-full bg-green-600 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
             btnStart.innerText = "✅ COMPLETED!";
             btnStart.disabled = false;
             
-            // Garante que o estado em memória reflita a conclusão dos itens pendentes
-            filaMusicas.forEach((item) => {
-                if(item.status === 'pendente' || item.status === 'processando') {
-                    item.status = 'concluido';
+            musicQueue.forEach((item) => {
+                if(item.status === 'pending' || item.status === 'processing' || item.status === 'pendente' || item.status === 'processando') {
+                    item.status = 'completed';
                 }
             });
 
-            atualizarFilaUI();
+            updateQueueUI();
         };
 
-        async function testarConexao() {
+        async function testConnection() {
             const msgEl = document.getElementById('testMsg');
-            msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity";
+            msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-neutral-400";
             
-            const url = document.getElementById('jellyUrl').value.trim();
+            let url = document.getElementById('jellyUrl').value.trim();
             const api = document.getElementById('jellyApi').value.trim();
 
             if(!url || !api) {
                 msgEl.innerText = "Please fill in both the URL and the API Key.";
-                msgEl.classList.add("text-red-500");
+                msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-red-500";
                 return;
             }
 
+            // CORREÇÃO CRÍTICA: Adiciona automaticamente 'http://' se o utilizador esquecer
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'http://' + url;
+                document.getElementById('jellyUrl').value = url; 
+                saveAutoSettings(); 
+            }
+
             msgEl.innerText = "Testing connection...";
-            msgEl.classList.add("text-neutral-400");
 
             try {
-                let resposta;
+                let response = await window.pywebview.api.test_jellyfin(url, api);
 
-                if (window.pywebview && window.pywebview.api && window.pywebview.api.testar_jellyfin) {
-                    resposta = await window.pywebview.api.testar_jellyfin(url, api);
+                msgEl.innerText = response.message || response.mensagem;
+                if(response.status === 'success' || response.status === 'sucesso') {
+                    msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-green-500";
                 } else {
-                    const requisicao = await fetch('/api/testar_jellyfin', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: url, api_key: api })
-                    });
-                    resposta = await requisicao.json();
+                    msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-red-500";
                 }
-
-                msgEl.classList.remove("text-neutral-400");
-                msgEl.innerText = resposta.mensagem;
-                if(resposta.status === 'sucesso') {
-                    msgEl.classList.add("text-green-500");
-                } else {
-                    msgEl.classList.add("text-red-500");
-                }
-            } catch (erro) {
-                msgEl.classList.remove("text-neutral-400");
+            } catch (error) {
                 msgEl.innerText = "❌ Connection failed. Check if the URL is correct and the server is online.";
-                msgEl.classList.add("text-red-500");
-                console.error("Erro no teste de conexão:", erro);
+                msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-red-500";
+                console.error("Connection test error:", error);
             }
         }
 
-        // 2. CARREGAMENTO HÍBRIDO DE CONFIGURAÇÕES
-        async function carregarConfiguracoes() {
+        async function loadSettings() {
             try {
-                let config;
-                if (window.pywebview && window.pywebview.api) {
-                    config = await pywebview.api.obter_configuracoes();
-                } else {
-                    const res = await fetch('/api/obter_configuracoes');
-                    config = await res.json();
-                }
+                let config = await window.pywebview.api.get_settings();
                 
                 if(config) {
-                    document.getElementById('lufsInput').value = config.lufs;
+                    document.getElementById('lufsInput').value = config.lufs !== undefined ? config.lufs : -24;
                     document.getElementById('jellyfinCheck').checked = config.jelly_check;
-                    document.getElementById('jellyUrl').value = config.jelly_url;
-                    document.getElementById('jellyApi').value = config.jelly_api;
+                    document.getElementById('jellyUrl').value = config.jelly_url || "";
+                    document.getElementById('jellyApi').value = config.jelly_api || "";
 
                     if(config.open_browser !== undefined) {
                         document.getElementById('openBrowserCheck').checked = config.open_browser;
@@ -817,25 +841,16 @@ System ready. Awaiting tasks...
                     }
                 }
             } catch (error) {
-                console.error("Erro ao carregar configurações:", error);
+                console.error("Error loading settings:", error);
             }
         }
 
-        // Ativa o carregamento no Navegador
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!window.pywebview) {
-                carregarConfiguracoes();
-            }
-        });
-
-        // Ativa o carregamento no Desktop
         window.addEventListener('pywebviewready', function() {
-            carregarConfiguracoes();
+            loadSettings();
         });
 
-        // 3. SALVAMENTO HÍBRIDO (Sem travas)
-        async function salvarConfigsAuto() {
-            const dados = {
+        async function saveAutoSettings() {
+            const data = {
                 lufs: document.getElementById('lufsInput').value,
                 jelly_check: document.getElementById('jellyfinCheck').checked,
                 jelly_url: document.getElementById('jellyUrl').value,
@@ -845,16 +860,10 @@ System ready. Awaiting tasks...
 
             try {
                 if (window.pywebview && window.pywebview.api) {
-                    pywebview.api.salvar_configuracoes(dados);
-                } else {
-                    await fetch('/api/salvar_configuracoes', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(dados)
-                    });
+                    await window.pywebview.api.save_settings(data);
                 }
             } catch (error) {
-                console.error("Erro ao salvar configurações automaticamente:", error);
+                console.error("Error auto-saving settings:", error);
             }
         }
     </script>
