@@ -568,7 +568,49 @@ class Api:
                 # Se não encontrou características de anime, assumimos que já estamos na pasta Avó ("Animes")
                 return pasta_anime
 
-    def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo):
+    def _auto_organizar_temporada_unica(self, pasta_anime):
+        """Verifica se os ficheiros de vídeo e a pasta theme-music estão soltos e organiza-os numa pasta Season 01."""
+        try:
+            itens_na_pasta = os.listdir(pasta_anime)
+            
+            # Verifica se já tem alguma pasta de temporada
+            tem_temporada = any("season" in item.lower() for item in itens_na_pasta if os.path.isdir(os.path.join(pasta_anime, item)))
+            
+            if not tem_temporada:
+                nome_anime = os.path.basename(pasta_anime)
+                nome_nova_temp = f"Season 01. {nome_anime}"
+                caminho_nova_temp = os.path.join(pasta_anime, nome_nova_temp)
+                
+                extensoes_media = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
+                itens_movidos = 0
+                
+                for item in itens_na_pasta:
+                    caminho_item = os.path.join(pasta_anime, item)
+                    
+                    # 1. Move os ficheiros de vídeo/legendas
+                    if os.path.isfile(caminho_item) and item.lower().endswith(extensoes_media):
+                        if not os.path.exists(caminho_nova_temp):
+                            os.makedirs(caminho_nova_temp)
+                        shutil.move(caminho_item, os.path.join(caminho_nova_temp, item))
+                        itens_movidos += 1
+                        
+                    # 2. Move a pasta theme-music inteira
+                    elif os.path.isdir(caminho_item) and item.lower() == "theme-music":
+                        if not os.path.exists(caminho_nova_temp):
+                            os.makedirs(caminho_nova_temp)
+                        shutil.move(caminho_item, os.path.join(caminho_nova_temp, item))
+                        itens_movidos += 1
+                        
+                if itens_movidos > 0:
+                    print(f"\n[AUTO-ORGANIZE] 🧹 {itens_movidos} item(ns) arrumados automaticamente para '{nome_nova_temp}'!")
+        except Exception as e:
+            print(f"[AUTO-ORGANIZE] ❌ Erro ao organizar pasta {pasta_anime}: {e}")
+
+    def melhorar_musicas_locais(self, pasta_alvo, modo_batch, lufs_alvo, opcoes=None):
+        # Se não vierem opções (por segurança), assume que é para fazer tudo
+        if opcoes is None:
+            opcoes = {"normalize": True, "metadata": True, "organize": True}
+            
         if not pasta_alvo or not os.path.exists(pasta_alvo):
             return {"status": "erro", "mensagem": "Invalid directory."}
         
@@ -580,6 +622,7 @@ class Api:
             print("[ENHANCE] Iniciando processo de melhoria de áudio...")
             print(f"[ENHANCE] Modo Batch (Todas as subpastas): {'Sim' if modo_batch else 'Não'}")
             print(f"[ENHANCE] Volume Alvo: {lufs_alvo} LUFS")
+            print(f"[ENHANCE] Opções ativas: {opcoes}")
             print("=======================================================\n")
 
             arquivos_afetados = 0
@@ -597,6 +640,15 @@ class Api:
             
             for pasta_anime in pastas_para_processar:
                 nome_anime = os.path.basename(pasta_anime)
+                
+                # 1. ORGANIZAR (Se marcado)
+                if opcoes.get("organize", True):
+                    self._auto_organizar_temporada_unica(pasta_anime)
+                
+                # Se não for para normalizar nem pôr metadados, ignora a procura de MP3
+                if not opcoes.get("normalize", True) and not opcoes.get("metadata", True):
+                    continue
+
                 mp3s_nesta_pasta = []
                 
                 for raiz, _, arquivos in os.walk(pasta_anime):
@@ -611,18 +663,25 @@ class Api:
                 print(f"\n[ENHANCE] ✨ Melhorando áudios na pasta: {nome_anime}")
                 
                 for mp3 in mp3s_nesta_pasta:
-                    print(f"[ENHANCE] 🎚️ Normalizando: {os.path.basename(mp3)}")
-                    if normalizar_audio_ffmpeg(mp3, lufs_alvo):
-                        arquivos_afetados += 1
-                        
-                processar_capas_pasta_atual(pasta_anime, nome_anime, config_atual)
+                    # 2. NORMALIZAR (Se marcado)
+                    if opcoes.get("normalize", True):
+                        print(f"[ENHANCE] 🎚️ Normalizando: {os.path.basename(mp3)}")
+                        if normalizar_audio_ffmpeg(mp3, lufs_alvo):
+                            arquivos_afetados += 1
+                    else:
+                        arquivos_afetados += 1 # Conta como afetado para os metadados
+                            
+                # 3. METADADOS (Se marcado)
+                if opcoes.get("metadata", True):
+                    processar_capas_pasta_atual(pasta_anime, nome_anime, config_atual)
                 
             print("\n=======================================================")
-            print(f"[ENHANCE] Concluído! {arquivos_afetados} arquivo(s) modificado(s).")
+            print(f"[ENHANCE] Concluído! {arquivos_afetados} arquivo(s) modificado(s)/lido(s).")
             print("=======================================================\n")
             
-            if arquivos_afetados > 0:
-                return {"status": "sucesso", "mensagem": f"Done! {arquivos_afetados} files enhanced."}
+            # Se organizou a pasta ou editou ficheiros, retorna sucesso
+            if arquivos_afetados > 0 or opcoes.get("organize", True):
+                return {"status": "sucesso", "mensagem": f"Done! Process completed successfully."}
             else:
                 return {"status": "sucesso", "mensagem": "No .mp3 files found to enhance."}
                 
@@ -908,10 +967,13 @@ def api_flask_melhorar_musicas():
         pasta = dados.get('pasta', '')
         modo_batch = dados.get('modoBatch', False)
         lufs = dados.get('lufs', '-24')
+        opcoes = dados.get('opcoes', None) # <--- 1. CAPTURANDO AS OPÇÕES AQUI
         
-        print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {pasta} | Batch: {modo_batch} | LUFS: {lufs}")
+        # Atualizei o print para mostrar no terminal o que foi recebido
+        print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {pasta} | Batch: {modo_batch} | LUFS: {lufs} | Opções: {opcoes}")
         
-        resultado = api_sistema.melhorar_musicas_locais(pasta, modo_batch, lufs)
+        # 2. ADICIONANDO 'opcoes' COMO O QUARTO PARÂMETRO
+        resultado = api_sistema.melhorar_musicas_locais(pasta, modo_batch, lufs, opcoes)
         return jsonify(resultado)
         
     except Exception as e:

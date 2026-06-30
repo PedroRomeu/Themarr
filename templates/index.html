@@ -171,29 +171,54 @@ System ready. Awaiting tasks...
         </div>
     </div>
 
-    <div id="enhanceModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 transition-opacity backdrop-blur-sm">
-        <div class="bg-neutral-800 border border-neutral-700 rounded-md p-5 max-w-sm w-full shadow-xl">
-            <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                ✨ Enhance Existing Audio
-            </h2>
-            <p class="text-xs text-neutral-400 mb-5 leading-relaxed">
-                This will normalize the volume (LUFS) and fetch Jellyfin metadata for existing .mp3 files without downloading new ones. Choose the scope:
-            </p>
-            <div class="flex flex-col gap-2 text-xs">
-                <button onclick="confirmarEnhance(false)" class="bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
-                    <span><strong>1. This Folder Only</strong></span>
-                    <span class="text-neutral-500">Selected directory</span>
+    <div id="enhanceModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 animate-fade-in">
+    <div class="bg-[#2d2d2d] rounded-xl p-6 w-96 border border-gray-700 shadow-2xl">
+        <h3 class="text-xl font-bold mb-2 text-blue-400 flex items-center gap-2">
+            ✨ Enhance Library
+        </h3>
+        <p class="text-gray-400 text-xs mb-5">Select which operations you want to perform:</p>
+        
+        <div class="space-y-3 mb-6">
+            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                <input type="checkbox" id="chkNormalize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                <div>
+                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Normalize Audio</span>
+                    <span class="block text-[11px] text-gray-400">Analyze and adjust volume to standard LUFS levels.</span>
+                </div>
+            </label>
+            
+            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                <input type="checkbox" id="chkMetadata" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                <div>
+                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Embed Metadata & Artwork</span>
+                    <span class="block text-[11px] text-gray-400">Inject official titles, artist tags, and cover posters.</span>
+                </div>
+            </label>
+            
+            <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                <input type="checkbox" id="chkOrganize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                <div>
+                    <span class="block font-medium text-gray-200 group-hover:text-white transition">Organize Folder Structure</span>
+                    <span class="block text-[11px] text-gray-400">Automatically group loose media into 'Season 01' folders.</span>
+                </div>
+            </label>
+        </div>
+        
+        <div class="flex flex-col gap-2">
+            <div class="flex gap-2">
+                <button onclick="dispararEnhance('this')" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
+                    This Folder
                 </button>
-                <button onclick="confirmarEnhance(true)" class="bg-purple-900/30 hover:bg-purple-900/50 border border-purple-700/40 text-purple-200 px-3 py-2 rounded transition-colors text-left flex justify-between items-center">
-                    <span><strong>2. Batch Mode (All Subfolders)</strong></span>
-                    <span class="opacity-70">Entire Library</span>
-                </button>
-                <button onclick="fecharModalEnhance()" class="text-neutral-400 hover:text-neutral-200 px-3 py-2 mt-2 text-center rounded transition-colors">
-                    Cancel
+                <button onclick="dispararEnhance('all')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2.5 px-3 rounded-lg text-sm transition shadow-md active:scale-95">
+                    All Folders
                 </button>
             </div>
+            <button onclick="fecharModalEnhance()" class="text-gray-400 hover:text-gray-200 text-xs mt-2 text-center transition underline">
+                Cancel
+            </button>
         </div>
     </div>
+</div>
 
     <script>
         // ===================================================================
@@ -324,16 +349,49 @@ System ready. Awaiting tasks...
             document.getElementById('enhanceModal').classList.add('hidden');
         }
 
-        function confirmarEnhance(modoBatch) {
+        async function dispararEnhance(scope) {
+            // 1. Fecha o modal
             fecharModalEnhance();
+            
+            // 2. Pega as variáveis principais (Pasta e LUFS)
             const pasta = document.getElementById('pastaPath').innerText;
             const lufsAtual = document.getElementById('lufsInput').value;
+            const modoBatch = (scope === 'all'); // Se o botão clicado foi 'all', vira true
+            
+            // 3. Captura o estado dos checkboxes
+            const opcoes = {
+                normalize: document.getElementById('chkNormalize').checked,
+                metadata: document.getElementById('chkMetadata').checked,
+                organize: document.getElementById('chkOrganize').checked
+            };
+    
             mostrarToast("⏳ Processing audio... This might take a while.", "sucesso");
-
-            if(window.pywebview) {
-                pywebview.api.melhorar_musicas_locais(pasta, modoBatch, lufsAtual).then(res => {
-                    mostrarToast(res.mensagem, res.status);
-                });
+    
+            // 4. Envia TUDO para o backend de forma híbrida
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    // Modo Desktop
+                    pywebview.api.melhorar_musicas_locais(pasta, modoBatch, lufsAtual, opcoes).then(res => {
+                        mostrarToast(res.mensagem, res.status);
+                    });
+                } else {
+                    // Modo Servidor (Flask)
+                    let res = await fetch('/api/melhorar_musicas_locais', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            pasta: pasta, 
+                            modoBatch: modoBatch, 
+                            lufs: lufsAtual,
+                            opcoes: opcoes 
+                        })
+                    });
+                    let data = await res.json();
+                    mostrarToast(data.mensagem, data.status);
+                }
+            } catch (error) {
+                console.error("Erro ao iniciar o Enhance:", error);
+                mostrarToast("❌ Failed to start process.", "erro");
             }
         }
 
