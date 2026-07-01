@@ -329,6 +329,23 @@ def download_jellyfin_image(image_url, api_key, dest_folder, file_name="cover.jp
         print(f"[JELLYFIN] ❌ Error during image download: {e}")
         return None
 
+def fetch_jellyfin_season_image(series_id, season_num, jellyfin_url, api_key):
+    clean_url = jellyfin_url.rstrip('/')
+    headers = {"X-Emby-Token": api_key}
+    try:
+        res = requests.get(f"{clean_url}/Shows/{series_id}/Seasons", headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            for season in data.get("Items", []):
+                if season.get("IndexNumber") == season_num:
+                    season_id = season.get("Id")
+                    if season_id:
+                        print(f"[JELLYFIN] 🖼️ Found Season {season_num} specific cover!")
+                        return f"{clean_url}/Items/{season_id}/Images/Primary"
+    except Exception as e:
+        print(f"[JELLYFIN] ❌ Error fetching season {season_num} data: {e}")
+    return None
+
 def inject_mp3_metadata(mp3_path, image_path, title, album, genre):
     try:
         audio = MP3(mp3_path, ID3=ID3)
@@ -374,6 +391,7 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
     
     final_genre = "" 
     final_album_name = anime_folder_name 
+    series_id = None
 
     for file_name in local_cover_names:
         test_path = os.path.join(anime_folder_path, file_name)
@@ -392,13 +410,14 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
         if search_result["success"]:
             final_genre = search_result["genres"]
             final_album_name = search_result["official_name"]
+            series_id = search_result["series_id"]
             
             if final_genre:
                 print(f"[AUTOMATION] 🏷️ Genres found: {final_genre}")
             
             if not final_image_path and search_result["image_url"]:
                 temp_folder = tempfile.gettempdir()
-                temp_file_name = f"temp_cover_{search_result['series_id']}.jpg"
+                temp_file_name = f"temp_cover_{series_id}.jpg"
                 
                 final_image_path = download_jellyfin_image(
                     image_url=search_result["image_url"],
@@ -413,13 +432,47 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
     print("[AUTOMATION] 🚀 Scanning folder to apply metadata to MP3 files...")
     mp3_found = 0
     
+    season_images_cache = {} 
+    
     for root, subfolders, files in os.walk(anime_folder_path):
         for file in files:
             if file.lower().endswith('.mp3'):
                 full_mp3_path = os.path.join(root, file)
                 music_title = os.path.splitext(file)[0]
                 
-                if inject_mp3_metadata(full_mp3_path, final_image_path, music_title, final_album_name, final_genre):
+                current_image_path = final_image_path
+                
+                season_match = re.search(r'Season\s+(\d+)', root, re.IGNORECASE)
+                
+                if season_match and series_id and jelly_url and jelly_api:
+                    season_num = int(season_match.group(1))
+                    
+                    if season_num in season_images_cache:
+                        current_image_path = season_images_cache[season_num] or final_image_path
+                    else:
+                        print(f"[AUTOMATION] 🔍 Looking for Season {season_num} specific cover on Jellyfin...")
+                        season_image_url = fetch_jellyfin_season_image(series_id, season_num, jelly_url, jelly_api)
+                        
+                        if season_image_url:
+                            temp_folder = tempfile.gettempdir()
+                            temp_file_name = f"temp_cover_{series_id}_S{season_num}.jpg"
+                            
+                            downloaded_season_path = download_jellyfin_image(
+                                image_url=season_image_url,
+                                api_key=jelly_api,
+                                dest_folder=temp_folder,
+                                file_name=temp_file_name
+                            )
+                            if downloaded_season_path:
+                                season_images_cache[season_num] = downloaded_season_path
+                                current_image_path = downloaded_season_path
+                            else:
+                                season_images_cache[season_num] = None
+                        else:
+                            print(f"[JELLYFIN] ⚠️ Cover for Season {season_num} not found. Using main cover fallback.")
+                            season_images_cache[season_num] = None
+
+                if inject_mp3_metadata(full_mp3_path, current_image_path, music_title, final_album_name, final_genre):
                     mp3_found += 1
                     
     print(f"[AUTOMATION] ✨ Done! Metadata applied to {mp3_found} MP3 file(s).")
@@ -427,9 +480,15 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
     if temp_image and final_image_path:
         try:
             os.remove(final_image_path)
-            print("[AUTOMATION] 🧹 Temporary image file deleted successfully. Folder clean!")
-        except Exception as e:
-            print(f"[AUTOMATION] ⚠️ Could not delete temporary image: {e}")
+        except Exception:
+            pass
+            
+    for s_img in season_images_cache.values():
+        if s_img and os.path.exists(s_img):
+            try:
+                os.remove(s_img)
+            except Exception:
+                pass
 
 # =======================================================
 # JS -> PYTHON COMMUNICATION BRIDGE (API CLASS)

@@ -2,7 +2,7 @@ import os
 import webbrowser
 import pystray
 from PIL import Image, ImageDraw
-from main import iniciar_flask_background, carregar_config
+from main import start_flask_background, load_config
 
 def create_tray_icon():
     image = Image.new('RGB', (64, 64), color=(30, 30, 30))
@@ -18,9 +18,9 @@ def on_exit(icon, item):
     os._exit(0)
 
 if __name__ == '__main__':
-    iniciar_flask_background()
+    start_flask_background()
     
-    config = carregar_config()
+    config = load_config()
     if config.get("open_browser", True):
         webbrowser.open("http://127.0.0.1:5000")
         
