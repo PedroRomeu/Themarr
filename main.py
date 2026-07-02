@@ -77,7 +77,12 @@ def load_config():
         "jelly_url": "", 
         "jelly_api": "",
         "open_browser": True,
-        "audio_fx": {}
+        "audio_fx": {
+            "enabled": False, 
+            "remove_silence": False, 
+            "fade_in": 0, 
+            "fade_out": 0
+        }
     }
     
     if os.path.exists(CONFIG_FILE):
@@ -102,32 +107,38 @@ def save_config(data):
 # ==========================================
 # CORE UTILITIES (FFMPEG & FILE MANAGEMENT)
 # ==========================================
-def build_audio_filter_chain(input_file, target_lufs, audio_effects):
-    """Constrói a corrente de filtros do FFmpeg baseada nas escolhas do usuário"""
+def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_enabled=True):
+    """Builds the FFmpeg filter chain based on user choices"""
     if audio_effects is None:
         audio_effects = {}
         
     filters = []
     
-    if audio_effects.get("remove_silence"):
-        filters.append("silenceremove=start_periods=1:start_threshold=-50dB")
+    if audio_effects.get("enabled", False):
         
-    if audio_effects.get("fade_in", 0) > 0:
-        duration_in = audio_effects.get("fade_in")
-        filters.append(f"afade=t=in:st=0:d={duration_in}")
-        
-    if audio_effects.get("fade_out", 0) > 0:
-        try:
-            audio = MP3(input_file)
-            total_time = audio.info.length
-            duration_out = audio_effects.get("fade_out")
+        if audio_effects.get("remove_silence"):
+            filters.append("silenceremove=start_periods=1:start_threshold=-50dB")
             
-            start_time = max(0, total_time - duration_out)
-            filters.append(f"afade=t=out:st={start_time}:d={duration_out}")
-        except Exception as e:
-            print(f"[AUDIO] ⚠️ Aviso: Não foi possível aplicar o Fade Out (Falha ao ler duração): {e}")
+        if audio_effects.get("fade_in", 0) > 0:
+            duration_in = audio_effects.get("fade_in")
+            filters.append(f"afade=t=in:st=0:d={duration_in}")
+            
+        if audio_effects.get("fade_out", 0) > 0:
+            try:
+                audio = MP3(input_file)
+                total_time = audio.info.length
+                duration_out = audio_effects.get("fade_out")
+                
+                start_time = max(0, total_time - duration_out)
+                filters.append(f"afade=t=out:st={start_time}:d={duration_out}")
+            except Exception as e:
+                print(f"[AUDIO] ⚠️ Warning: Could not apply Fade Out (Failed to read duration): {e}")
 
-    filters.append(f"loudnorm=I={target_lufs}:LRA=11:TP=-1.0")
+    if normalize_enabled:
+        filters.append(f"loudnorm=I={target_lufs}:LRA=11:TP=-1.0")
+
+    if not filters:
+        filters.append("anull")
     
     return ",".join(filters)
 
@@ -151,11 +162,11 @@ def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=
     print("[AUDIO] ✨ Success! File is treated and ready.")
 
 
-def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None):
-    """Versão de tratamento para arquivos locais (Batch Mode / Enhance)"""
+def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_enabled=True):
+    """Processing version for local files (Batch Mode / Enhance)"""
     temp_file = mp3_path + ".temp.mp3"
     
-    filter_chain = build_audio_filter_chain(mp3_path, target_lufs, audio_effects)
+    filter_chain = build_audio_filter_chain(mp3_path, target_lufs, audio_effects, normalize_enabled)
     
     command = [
         FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-y",
@@ -211,30 +222,24 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
         theme_music_folder = os.path.join(anime_folder, 'theme-music')
         loose_theme_file = os.path.join(anime_folder, 'theme.mp3')
         
-        # CASO 1: É múltiplo na fila de agora OU a pasta 'theme-music' já existe no disco
         if multiple_main or os.path.isdir(theme_music_folder):
             final_folder = theme_music_folder
             final_file = os.path.join(final_folder, custom_name)
             
-        # CASO 2: A pasta não existe, mas existe um ficheiro 'theme.mp3' solto de um download anterior
         elif os.path.exists(loose_theme_file):
             os.makedirs(theme_music_folder, exist_ok=True)
-            # Arrasta o ficheiro solto antigo para a nova pasta 'theme-music'
             shutil.move(loose_theme_file, os.path.join(theme_music_folder, 'theme.mp3'))
             print("[SYSTEM] Migrated existing 'theme.mp3' to 'theme-music' folder to support multiple themes.")
             
-            # Configura a nova música para ir para a pasta criada
             final_folder = theme_music_folder
             final_file = os.path.join(final_folder, custom_name)
             
-        # CASO 3: É a primeira vez (sem pasta e sem ficheiro solto) e só há uma música na fila
         else:
             final_folder = anime_folder
             final_file = os.path.join(final_folder, 'theme.mp3')
     else:
         raise ValueError("Theme type must be 'main' or 'season'.")
 
-    # Garante que a pasta final (qualquer que seja a decisão acima) seja criada
     os.makedirs(final_folder, exist_ok=True)
     return final_file
 
@@ -665,11 +670,11 @@ class Api:
                 if options.get("organize", True):
                     self._auto_organize_single_season(anime_folder)
                 
-                if not options.get("normalize", True) and not options.get("metadata", True):
+                if not options.get("normalize", True) and not options.get("metadata", True) and not options.get("audio_fx", False):
                     continue
 
                 mp3s_in_folder = []
-                
+
                 for root, _, files in os.walk(anime_folder):
                     for file in files:
                         if file.lower().endswith('.mp3'):
@@ -680,11 +685,17 @@ class Api:
                     continue 
                 
                 print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {anime_name}")
+
+                normalize_active = options.get("normalize", True)
+                fx_active = options.get("audio_fx", False)
                 
                 for mp3 in mp3s_in_folder:
-                    if options.get("normalize", True):
-                        print(f"[ENHANCE] 🎚️ Normalizing: {os.path.basename(mp3)}")
-                        if normalize_audio_ffmpeg(mp3, target_lufs, audio_effects):
+                    if normalize_active or fx_active:
+                        print(f"[ENHANCE] 🎚️ Processing Audio: {os.path.basename(mp3)}")
+                    
+                        effs = audio_effects if fx_active else {}
+                    
+                        if normalize_audio_ffmpeg(mp3, target_lufs, effs, normalize_enabled=normalize_active):
                             affected_files += 1
                     else:
                         affected_files += 1 

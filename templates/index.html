@@ -81,7 +81,13 @@
                 </div>
 
                 <div id="trackFxDrawer" class="hidden mt-2 p-2.5 bg-neutral-800/40 border border-neutral-700/50 rounded-md transition-all">
-                    <div class="flex items-center justify-between gap-4">
+                    
+                    <label class="flex items-center gap-2 cursor-pointer mb-2 pb-2 border-b border-neutral-700/50 group">
+                        <input type="checkbox" id="trackFxEnable" onchange="toggleFxState('trackFxEnable', 'trackFxContainer')" class="w-3.5 h-3.5 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                        <span class="text-xs font-semibold text-neutral-300 group-hover:text-white transition-colors">Apply Custom FX for this track</span>
+                    </label>
+
+                    <div id="trackFxContainer" class="flex items-center justify-between gap-4 opacity-50 pointer-events-none transition-opacity duration-200">
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="trackRemoveSilence" class="w-3.5 h-3.5 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                             <span class="text-xs font-medium text-neutral-400">Remove Silence</span>
@@ -90,11 +96,11 @@
                         <div class="flex gap-4">
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] font-bold text-neutral-500 uppercase">Fade-In</label>
-                                <input type="number" id="trackFadeIn" placeholder="Auto" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
+                                <input type="number" id="trackFadeIn" placeholder="0" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
                             </div>
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] font-bold text-neutral-500 uppercase">Fade-Out</label>
-                                <input type="number" id="trackFadeOut" placeholder="Auto" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
+                                <input type="number" id="trackFadeOut" placeholder="0" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
                             </div>
                         </div>
                     </div>
@@ -158,24 +164,29 @@ System ready. Awaiting tasks...
                 <p id="testMsg" class="text-sm font-bold text-center mt-2 hidden transition-opacity"></p>
 
                 <div class="mt-2 pt-4 border-t border-neutral-700">
-                    <h3 class="text-sm font-semibold text-neutral-400 mb-3 flex items-center justify-between">
-                        Audio Effects (FFmpeg)
+                    <label class="flex items-center gap-2 cursor-pointer mb-3 justify-between group">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="globalFxEnable" onchange="toggleFxState('globalFxEnable', 'globalFxContainer'); saveAutoSettings()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                            <span class="text-sm font-semibold text-neutral-300 group-hover:text-white transition-colors">Enable Audio Effects</span>
+                        </div>
                         <span class="text-[9px] bg-neutral-700/50 text-neutral-400 px-1.5 py-0.5 rounded uppercase tracking-wider font-bold border border-neutral-600">Global & Enhance</span>
-                    </h3>
-                    
-                    <label class="flex items-center gap-2 cursor-pointer mb-3">
-                        <input type="checkbox" id="removeSilenceCheck" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700" onchange="saveAutoSettings()">
-                        <span class="text-sm font-medium text-neutral-300">Remove silence at the beginning</span>
                     </label>
                     
-                    <div class="flex gap-4">
-                        <div class="flex-1">
-                            <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-IN (SEC)</label>
-                            <input type="number" id="fadeInInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
-                        </div>
-                        <div class="flex-1">
-                            <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-OUT (SEC)</label>
-                            <input type="number" id="fadeOutInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
+                    <div id="globalFxContainer" class="opacity-50 pointer-events-none transition-opacity duration-200">
+                        <label class="flex items-center gap-2 cursor-pointer mb-3">
+                            <input type="checkbox" id="removeSilenceCheck" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700" onchange="saveAutoSettings()">
+                            <span class="text-sm font-medium text-neutral-300">Remove silence at the beginning</span>
+                        </label>
+                        
+                        <div class="flex gap-4">
+                            <div class="flex-1">
+                                <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-IN (SEC)</label>
+                                <input type="number" id="fadeInInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-OUT (SEC)</label>
+                                <input type="number" id="fadeOutInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -228,6 +239,14 @@ System ready. Awaiting tasks...
                     <div>
                         <span class="block font-medium text-gray-200 group-hover:text-white transition">Normalize Audio</span>
                         <span class="block text-[11px] text-gray-400">Analyze and adjust volume to standard LUFS levels.</span>
+                    </div>
+                </label>
+
+                <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                    <input type="checkbox" id="chkAudioFx" class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
+                    <div>
+                        <span class="block font-medium text-gray-200 group-hover:text-white transition">Apply Audio Effects</span>
+                        <span class="block text-[11px] text-gray-400">Apply Fades and Remove Silence (based on global settings).</span>
                     </div>
                 </label>
                 
@@ -327,6 +346,16 @@ System ready. Awaiting tasks...
             drawer.classList.toggle('hidden');
         }
 
+        function toggleFxState(checkboxId, containerId) {
+            const isChecked = document.getElementById(checkboxId).checked;
+            const container = document.getElementById(containerId);
+            if (isChecked) {
+                container.classList.remove('opacity-50', 'pointer-events-none');
+            } else {
+                container.classList.add('opacity-50', 'pointer-events-none');
+            }
+        }
+
         function openDeleteModal() {
             const folder = document.getElementById('folderPath').innerText; 
             if (folder === "No folder selected..." || folder.trim() === "") {
@@ -406,12 +435,12 @@ System ready. Awaiting tasks...
             closeEnhanceModal();
             
             const folder = document.getElementById('folderPath').innerText;
-            // CORREÇÃO CRÍTICA: Forçamos o valor do LUFS a ser um Número Inteiro
             const currentLufs = parseInt(document.getElementById('lufsInput').value) || -24; 
             const batchMode = (scope === 'all'); 
             
             const options = {
                 normalize: document.getElementById('chkNormalize').checked,
+                audio_fx: document.getElementById('chkAudioFx').checked,
                 metadata: document.getElementById('chkMetadata').checked,
                 organize: document.getElementById('chkOrganize').checked
             };
@@ -590,6 +619,7 @@ System ready. Awaiting tasks...
             
             if (!fxDrawer.classList.contains('hidden')) {
                 customFx = {
+                    enabled: document.getElementById('trackFxEnable').checked,
                     remove_silence: document.getElementById('trackRemoveSilence').checked,
                     fade_in: parseInt(document.getElementById('trackFadeIn').value) || 0,
                     fade_out: parseInt(document.getElementById('trackFadeOut').value) || 0
@@ -608,6 +638,8 @@ System ready. Awaiting tasks...
             document.getElementById('linkInput').value = "";
             document.getElementById('nameInput').value = "";
             
+            document.getElementById('trackFxEnable').checked = false;
+            toggleFxState('trackFxEnable', 'trackFxContainer');
             document.getElementById('trackRemoveSilence').checked = false;
             document.getElementById('trackFadeIn').value = "";
             document.getElementById('trackFadeOut').value = "";
@@ -914,14 +946,17 @@ System ready. Awaiting tasks...
                     }
 
                     if (config.audio_fx) {
+                        document.getElementById('globalFxEnable').checked = config.audio_fx.enabled || false;
                         document.getElementById('removeSilenceCheck').checked = config.audio_fx.remove_silence || false;
                         document.getElementById('fadeInInput').value = config.audio_fx.fade_in || 0;
                         document.getElementById('fadeOutInput').value = config.audio_fx.fade_out || 0;
                     } else {
+                        document.getElementById('globalFxEnable').checked = false;
                         document.getElementById('removeSilenceCheck').checked = false;
                         document.getElementById('fadeInInput').value = 0;
                         document.getElementById('fadeOutInput').value = 0;
                     }
+                    toggleFxState('globalFxEnable', 'globalFxContainer');
                 }
             } catch (error) {
                 console.error("Error loading settings:", error);
@@ -940,6 +975,7 @@ System ready. Awaiting tasks...
                 jelly_api: document.getElementById('jellyApi').value,
                 open_browser: document.getElementById('openBrowserCheck').checked,
                 audio_fx: {
+                    enabled: document.getElementById('globalFxEnable').checked,
                     remove_silence: document.getElementById('removeSilenceCheck').checked,
                     fade_in: parseInt(document.getElementById('fadeInInput').value) || 0,
                     fade_out: parseInt(document.getElementById('fadeOutInput').value) || 0
