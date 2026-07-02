@@ -76,7 +76,8 @@ def load_config():
         "jelly_check": False, 
         "jelly_url": "", 
         "jelly_api": "",
-        "open_browser": True
+        "open_browser": True,
+        "audio_fx": {}
     }
     
     if os.path.exists(CONFIG_FILE):
@@ -101,38 +102,83 @@ def save_config(data):
 # ==========================================
 # CORE UTILITIES (FFMPEG & FILE MANAGEMENT)
 # ==========================================
-def normalize_audio_ffmpeg(mp3_path, target_lufs):
-    """
-    Runs FFmpeg to normalize audio, imitating the safe logic from the old .bat file.
-    """
+def build_audio_filter_chain(input_file, target_lufs, audio_effects):
+    """Constrói a corrente de filtros do FFmpeg baseada nas escolhas do usuário"""
+    if audio_effects is None:
+        audio_effects = {}
+        
+    filters = []
+    
+    if audio_effects.get("remove_silence"):
+        filters.append("silenceremove=start_periods=1:start_threshold=-50dB")
+        
+    if audio_effects.get("fade_in", 0) > 0:
+        duration_in = audio_effects.get("fade_in")
+        filters.append(f"afade=t=in:st=0:d={duration_in}")
+        
+    if audio_effects.get("fade_out", 0) > 0:
+        try:
+            audio = MP3(input_file)
+            total_time = audio.info.length
+            duration_out = audio_effects.get("fade_out")
+            
+            start_time = max(0, total_time - duration_out)
+            filters.append(f"afade=t=out:st={start_time}:d={duration_out}")
+        except Exception as e:
+            print(f"[AUDIO] ⚠️ Aviso: Não foi possível aplicar o Fade Out (Falha ao ler duração): {e}")
+
+    filters.append(f"loudnorm=I={target_lufs}:LRA=11:TP=-1.0")
+    
+    return ",".join(filters)
+
+
+def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None):
+    print(f"\n[AUDIO] Enhancing & Normalizing -> {full_output_path}")
+    
+    filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects)
+    
+    command = [
+        FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', input_file, 
+        '-filter:a', filter_chain, 
+        '-b:a', '320k',
+        full_output_path
+    ]
+    
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    subprocess.run(command, check=True, startupinfo=startupinfo)
+    print("[AUDIO] ✨ Success! File is treated and ready.")
+
+
+def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None):
+    """Versão de tratamento para arquivos locais (Batch Mode / Enhance)"""
     temp_file = mp3_path + ".temp.mp3"
+    
+    filter_chain = build_audio_filter_chain(mp3_path, target_lufs, audio_effects)
     
     command = [
         FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-y",
         "-i", mp3_path,
-        "-filter:a", f"loudnorm=I={target_lufs}:LRA=11:TP=-1.0",
+        "-filter:a", filter_chain,
         "-b:a", "320k",
         temp_file
     ]
-    
+
     try:
-        # Run without opening black command windows
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        
         subprocess.run(command, check=True, startupinfo=startupinfo)
         
         if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
             shutil.move(temp_file, mp3_path)
             return True
         else:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+            if os.path.exists(temp_file): os.remove(temp_file)
             return False
     except Exception as e:
-        print(f"[FFMPEG] ❌ Error normalizing {mp3_path}: {e}")
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        print(f"[FFMPEG] ❌ Error processing {mp3_path}: {e}")
+        if os.path.exists(temp_file): os.remove(temp_file)
         return False
 
 def download_music(youtube_url):
@@ -191,20 +237,6 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
     # Garante que a pasta final (qualquer que seja a decisão acima) seja criada
     os.makedirs(final_folder, exist_ok=True)
     return final_file
-
-def normalize_and_save(input_file, full_output_path, target_lufs):
-    print(f"\n[AUDIO] Normalizing (Target: {target_lufs} LUFS) -> {full_output_path}")
-    command = [
-        FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-        '-i', input_file, '-filter:a', f'loudnorm=I={target_lufs}:LRA=11:TP=-1.0', '-b:a', '320k',
-        full_output_path
-    ]
-    
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    
-    subprocess.run(command, check=True, startupinfo=startupinfo)
-    print("[AUDIO] Success! File is ready.")
 
 def move_loose_episodes(root_folder, season_folder):
     media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
@@ -625,6 +657,7 @@ class Api:
                 folders_to_process.append(target_folder)
 
             current_config = self.get_settings() 
+            audio_effects = current_config.get("audio_fx", {})
             
             for anime_folder in folders_to_process:
                 anime_name = os.path.basename(anime_folder)
@@ -651,7 +684,7 @@ class Api:
                 for mp3 in mp3s_in_folder:
                     if options.get("normalize", True):
                         print(f"[ENHANCE] 🎚️ Normalizing: {os.path.basename(mp3)}")
-                        if normalize_audio_ffmpeg(mp3, target_lufs):
+                        if normalize_audio_ffmpeg(mp3, target_lufs, audio_effects):
                             affected_files += 1
                     else:
                         affected_files += 1 
@@ -738,12 +771,17 @@ class Api:
 
     def _execute_single_retry_thread(self, index, music, root_anime_folder):
         global global_state
+
+        current_config = self.get_settings()
+        audio_effects = current_config.get("audio_fx", {})
         
         link = music['link']
         name = music.get('name', music.get('nome'))
         destination = music.get('destination', music.get('destino'))
         lufs = music['lufs']
         has_multi_main = music.get('has_multi_main', False)
+
+        track_fx = music.get('audio_fx') or audio_effects
         
         print(f"\n[SYSTEM] Retrying single item: {name}...\n")
         
@@ -769,7 +807,7 @@ class Api:
                 temp_folder = None
 
             final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-            normalize_and_save(downloaded_file, final_path, lufs)
+            normalize_and_save(downloaded_file, final_path, lufs, track_fx)
             
             if "Season" in destination:
                 move_loose_episodes(root_anime_folder, destination)
@@ -816,6 +854,9 @@ class Api:
     def _execute_queue_thread(self, music_list, root_anime_folder):
         global global_state
 
+        current_config = self.get_settings()
+        audio_effects = current_config.get("audio_fx", {})
+
         total = len(music_list)
 
         global_state["item_statuses"] = ["waiting"] * total 
@@ -835,6 +876,8 @@ class Api:
             name = music.get('name', music.get('nome'))
             destination = music.get('destination', music.get('destino'))
             lufs = music['lufs']
+
+            track_fx = music.get('audio_fx') or audio_effects
             
             percentage = int((i / total) * 100)
             perc_text = f"{percentage}%" if i == 0 else f"{i}/{total} ({percentage}%)"
@@ -867,7 +910,7 @@ class Api:
                     temp_folder = None
 
                 final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-                normalize_and_save(downloaded_file, final_path, lufs)
+                normalize_and_save(downloaded_file, final_path, lufs, track_fx)
                 
                 global_state["item_statuses"][i] = "completed"
                 print(f"[SUCCESS] {name} finished successfully!")

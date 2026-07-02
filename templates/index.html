@@ -66,18 +66,38 @@
 
                     <div class="flex items-center bg-neutral-900 border border-neutral-700 rounded-md overflow-hidden flex-shrink-0 h-[38px]">
                         <span class="text-xs text-neutral-500 font-bold px-2">LUFS:</span>
-                        
-                        <button onclick="changeVolume(-1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">-</button>
-                        
-                        <input type="text" id="lufsInput" value="-24" oninput="validateLUFSInput(this)" 
-                               class="w-10 h-full bg-transparent text-center text-sm focus:outline-none font-bold text-white border-x border-neutral-700/70">
-                        
-                        <button onclick="changeVolume(1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors flex items-center justify-center">+</button>
+                        <button onclick="changeVolume(-1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors">-</button>
+                        <input type="text" id="lufsInput" value="-24" oninput="validateLUFSInput(this)" class="w-10 h-full bg-transparent text-center text-sm focus:outline-none font-bold text-white border-x border-neutral-700/70">
+                        <button onclick="changeVolume(1)" class="px-2.5 h-full hover:bg-neutral-700 font-bold text-neutral-400 hover:text-white transition-colors">+</button>
                     </div>
+
+                    <button onclick="toggleTrackFx()" class="bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-blue-400 px-3 rounded-md text-sm transition-colors flex-shrink-0 border border-neutral-700 h-[38px] flex items-center justify-center shadow-sm">
+                        🪄 FX
+                    </button>
 
                     <button onclick="addToQueue()" class="bg-neutral-700 hover:bg-neutral-600 text-white px-6 py-2 rounded-md text-sm font-bold transition-colors flex-shrink-0 border border-neutral-600 h-[38px]">
                         ➕ Add
                     </button>
+                </div>
+
+                <div id="trackFxDrawer" class="hidden mt-2 p-2.5 bg-neutral-800/40 border border-neutral-700/50 rounded-md transition-all">
+                    <div class="flex items-center justify-between gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="trackRemoveSilence" class="w-3.5 h-3.5 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
+                            <span class="text-xs font-medium text-neutral-400">Remove Silence</span>
+                        </label>
+                        
+                        <div class="flex gap-4">
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-neutral-500 uppercase">Fade-In</label>
+                                <input type="number" id="trackFadeIn" placeholder="Auto" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-neutral-500 uppercase">Fade-Out</label>
+                                <input type="number" id="trackFadeOut" placeholder="Auto" min="0" max="10" class="w-14 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500 text-center text-white placeholder-neutral-600">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -136,6 +156,30 @@ System ready. Awaiting tasks...
                 </button>
 
                 <p id="testMsg" class="text-sm font-bold text-center mt-2 hidden transition-opacity"></p>
+
+                <div class="mt-2 pt-4 border-t border-neutral-700">
+                    <h3 class="text-sm font-semibold text-neutral-400 mb-3 flex items-center justify-between">
+                        Audio Effects (FFmpeg)
+                        <span class="text-[9px] bg-neutral-700/50 text-neutral-400 px-1.5 py-0.5 rounded uppercase tracking-wider font-bold border border-neutral-600">Global & Enhance</span>
+                    </h3>
+                    
+                    <label class="flex items-center gap-2 cursor-pointer mb-3">
+                        <input type="checkbox" id="removeSilenceCheck" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700" onchange="saveAutoSettings()">
+                        <span class="text-sm font-medium text-neutral-300">Remove silence at the beginning</span>
+                    </label>
+                    
+                    <div class="flex gap-4">
+                        <div class="flex-1">
+                            <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-IN (SEC)</label>
+                            <input type="number" id="fadeInInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
+                        </div>
+                        <div class="flex-1">
+                            <label class="block text-xs font-bold text-neutral-500 mb-1">FADE-OUT (SEC)</label>
+                            <input type="number" id="fadeOutInput" value="0" min="0" max="10" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors" onchange="saveAutoSettings()">
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -277,6 +321,11 @@ System ready. Awaiting tasks...
                 window.dispatchEvent(new CustomEvent('pywebviewready'));
             }
         }, 500);
+
+        function toggleTrackFx() {
+            const drawer = document.getElementById('trackFxDrawer');
+            drawer.classList.toggle('hidden');
+        }
 
         function openDeleteModal() {
             const folder = document.getElementById('folderPath').innerText; 
@@ -536,10 +585,34 @@ System ready. Awaiting tasks...
             if(!destination || destination === "") { showToast("Please select a target folder!"); return; }
             if(pathTxt === "No folder selected...") { showToast("Please browse for a media folder first!"); return; }
 
-            musicQueue.push({ link: link, name: name, destination: destination, lufs: lufs, status: 'pending' });
+            let customFx = null;
+            const fxDrawer = document.getElementById('trackFxDrawer');
+            
+            if (!fxDrawer.classList.contains('hidden')) {
+                customFx = {
+                    remove_silence: document.getElementById('trackRemoveSilence').checked,
+                    fade_in: parseInt(document.getElementById('trackFadeIn').value) || 0,
+                    fade_out: parseInt(document.getElementById('trackFadeOut').value) || 0
+                };
+            }
+
+            musicQueue.push({ 
+                link: link, 
+                name: name, 
+                destination: destination, 
+                lufs: lufs, 
+                status: 'pending',
+                audio_fx: customFx 
+            });
             
             document.getElementById('linkInput').value = "";
             document.getElementById('nameInput').value = "";
+            
+            document.getElementById('trackRemoveSilence').checked = false;
+            document.getElementById('trackFadeIn').value = "";
+            document.getElementById('trackFadeOut').value = "";
+            fxDrawer.classList.add('hidden');
+            
             updateQueueUI();
         }
 
@@ -839,6 +912,16 @@ System ready. Awaiting tasks...
                     } else {
                         document.getElementById('openBrowserCheck').checked = true;
                     }
+
+                    if (config.audio_fx) {
+                        document.getElementById('removeSilenceCheck').checked = config.audio_fx.remove_silence || false;
+                        document.getElementById('fadeInInput').value = config.audio_fx.fade_in || 0;
+                        document.getElementById('fadeOutInput').value = config.audio_fx.fade_out || 0;
+                    } else {
+                        document.getElementById('removeSilenceCheck').checked = false;
+                        document.getElementById('fadeInInput').value = 0;
+                        document.getElementById('fadeOutInput').value = 0;
+                    }
                 }
             } catch (error) {
                 console.error("Error loading settings:", error);
@@ -855,7 +938,12 @@ System ready. Awaiting tasks...
                 jelly_check: document.getElementById('jellyfinCheck').checked,
                 jelly_url: document.getElementById('jellyUrl').value,
                 jelly_api: document.getElementById('jellyApi').value,
-                open_browser: document.getElementById('openBrowserCheck').checked
+                open_browser: document.getElementById('openBrowserCheck').checked,
+                audio_fx: {
+                    remove_silence: document.getElementById('removeSilenceCheck').checked,
+                    fade_in: parseInt(document.getElementById('fadeInInput').value) || 0,
+                    fade_out: parseInt(document.getElementById('fadeOutInput').value) || 0
+                }
             };
 
             try {
@@ -866,6 +954,7 @@ System ready. Awaiting tasks...
                 console.error("Error auto-saving settings:", error);
             }
         }
+
     </script>
 </body>
 </html>
