@@ -2,7 +2,8 @@ import os
 import webbrowser
 import pystray
 from PIL import Image, ImageDraw
-from main import start_flask_background, load_config
+from main import start_flask_background
+from core.config import load_config
 
 def create_tray_icon():
     image = Image.new('RGB', (64, 64), color=(30, 30, 30))
