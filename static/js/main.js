@@ -53,6 +53,14 @@ setTimeout(() => {
                         body: JSON.stringify({ folder: folder }) 
                     });
                     return await res.json();
+                },
+                search_youtube: async (query) => {
+                    let res = await fetch('/api/search_youtube', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' }, 
+                        body: JSON.stringify({ query: query }) 
+                    });
+                    return await res.json();
                 }
             }
         };
@@ -757,4 +765,113 @@ async function saveAutoSettings() {
     } catch (error) {
         console.error("Error auto-saving settings:", error);
     }
+}
+
+let ytLocalCache = [];
+let ytCurrentlyShown = 0;
+
+function openYoutubeSearchModal() {
+    document.getElementById('youtubeSearchModal').classList.remove('hidden');
+    setTimeout(() => {
+        document.getElementById('ytSearchQuery').focus();
+    }, 50);
+}
+
+function closeYoutubeSearchModal() {
+    document.getElementById('youtubeSearchModal').classList.add('hidden');
+}
+
+async function executeYoutubeSearch() {
+    const queryInput = document.getElementById('ytSearchQuery');
+    const container = document.getElementById('ytResultsContainer');
+    const loadMoreBtn = document.getElementById('btnYtLoadMore');
+    
+    const query = queryInput.value.trim();
+    if (!query) {
+        showToast("⚠️ Please type something to search!", "error");
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="text-center py-12 text-xs text-neutral-400 flex flex-col items-center justify-center gap-2">
+            <span class="animate-spin text-lg">⏳</span>
+            <span>Searching YouTube for "${query}"...</span>
+        </div>
+    `;
+    loadMoreBtn.classList.add('hidden');
+    
+    ytLocalCache = [];
+    ytCurrentlyShown = 0;
+
+    if (window.pywebview && window.pywebview.api) {
+        try {
+            const results = await window.pywebview.api.search_youtube(query);
+            
+            if (!results || results.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-xs text-neutral-500">❌ No results found. Try changing your keywords.</div>`;
+                return;
+            }
+
+            ytLocalCache = results;
+            container.innerHTML = "";
+            
+            renderMoreYoutubeResults();
+
+        } catch (err) {
+            console.error("YouTube Search Error:", err);
+            container.innerHTML = `<div class="text-center py-8 text-xs text-red-400">❌ Error connecting to backend search.</div>`;
+        }
+    }
+}
+
+function renderMoreYoutubeResults() {
+    const container = document.getElementById('ytResultsContainer');
+    const loadMoreBtn = document.getElementById('btnYtLoadMore');
+    
+    const itemsToLoad = (ytCurrentlyShown === 0) ? 15 : 5;
+    const nextLimit = Math.min(ytCurrentlyShown + itemsToLoad, ytLocalCache.length);
+    
+    const sliceToRender = ytLocalCache.slice(ytCurrentlyShown, nextLimit);
+    
+    sliceToRender.forEach(item => {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between p-2.5 bg-neutral-900/40 hover:bg-neutral-700/40 border border-neutral-700/30 rounded-md transition-all cursor-pointer group";
+        
+        const escapedTitle = item.title.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        row.setAttribute('onclick', `selectYoutubeResult('${escapedTitle}', '${item.url}')`);
+        
+        row.innerHTML = `
+            <div class="flex items-center gap-3 overflow-hidden">
+                <div class="flex-shrink-0 relative">
+                    <img src="${item.thumbnail}" alt="Capa" class="w-14 h-10 object-cover rounded shadow-sm border border-neutral-700/50">
+                </div>
+                
+                <div class="flex flex-col pr-3 truncate">
+                    <span class="text-xs font-medium text-neutral-200 group-hover:text-white transition truncate">${item.title}</span>
+                    <span class="text-[10px] text-neutral-500 truncate">${item.channel}</span>
+                </div>
+            </div>
+
+            <span class="text-[11px] font-mono text-neutral-500 bg-neutral-900 px-1.5 py-0.5 rounded flex-shrink-0">${item.duration || '0:00'}</span>
+        `;
+        container.appendChild(row);
+    });
+
+    ytCurrentlyShown = nextLimit;
+
+    if (ytCurrentlyShown < ytLocalCache.length) {
+        loadMoreBtn.classList.remove('hidden');
+    } else {
+        loadMoreBtn.classList.add('hidden');
+    }
+}
+
+function selectYoutubeResult(title, url) {
+    document.getElementById('linkInput').value = url;
+    document.getElementById('nameInput').value = title;
+    
+    showToast("🎵 Track selected!", "success");
+    closeYoutubeSearchModal();
+    
+    document.getElementById('nameInput').focus();
 }

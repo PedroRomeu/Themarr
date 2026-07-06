@@ -101,3 +101,18 @@ def register_routes(app, api_system):
         except Exception as e:
             print(f"[FLASK ERROR] Retry item failed: {e}")
             return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
+        
+    @app.route('/api/search_youtube', methods=['POST'])
+    def api_flask_search_youtube():
+        try:
+            data = request.get_json(force=True, silent=True) or {}
+            query = data.get('query', '')
+            
+            print(f"\n[RECEIVED FROM BROWSER] YouTube Search Query: {query}")
+            
+            result = api_system.search_youtube(query)
+            return jsonify(result)
+            
+        except Exception as e:
+            print(f"[FLASK ERROR] YouTube Search failed: {e}")
+            return jsonify([])

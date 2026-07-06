@@ -685,3 +685,50 @@ class Api:
         except Exception as e:
             print(f"[ERROR] get_subfolders failed: {str(e)}")
             return {"status": "error", "folders": [], "selected_anime": ""}
+        
+    def search_youtube(self, query):
+        if not query or not query.strip():
+            return []
+            
+        from yt_dlp import YoutubeDL
+        
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'force_generic_extractor': False,
+            'skip_download': True,
+        }
+        
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                search_result = ydl.extract_info(f"ytsearch35:{query}", download=False)
+                
+                results = []
+                if 'entries' in search_result:
+                    for entry in search_result['entries']:
+                        if not entry:
+                            continue
+                            
+                        duration_secs = entry.get('duration')
+                        duration_str = "0:00"
+                        if duration_secs:
+                            mins = int(duration_secs // 60)
+                            secs = int(duration_secs % 60)
+                            duration_str = f"{mins}:{secs:02d}"
+                        
+                        video_id = entry.get('id')
+                        thumb_url = f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg" if video_id else ""
+                        
+                        results.append({
+                            'title': entry.get('title', 'Unknown Title'),
+                            'url': f"https://www.youtube.com/watch?v={video_id}" if video_id else entry.get('url'),
+                            'channel': entry.get('uploader', 'Unknown Channel'),
+                            'duration': duration_str,
+                            'thumbnail': thumb_url
+                        })
+                    return results
+        except Exception as e:
+            print(f"[YOUTUBE SEARCH ERROR] Failed to fetch data: {e}")
+            return []
+            
+        return []

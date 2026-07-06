@@ -64,7 +64,17 @@
             <div class="bg-neutral-800 border border-neutral-700 rounded-md p-4 shadow-sm space-y-3">
                 
                 <div class="grid grid-cols-2 gap-3">
-                    <input type="text" id="linkInput" placeholder="YouTube URL" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
+                    
+                    <div class="relative w-full">
+                        <input type="text" id="linkInput" placeholder="YouTube URL" class="w-full bg-neutral-900 border border-neutral-700 rounded-md pl-3 pr-9 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
+                        
+                        <button onclick="openYoutubeSearchModal()" title="Search on YouTube" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-red-500 transition-colors cursor-pointer flex items-center justify-center p-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001q.044.06.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1 1 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/>
+                            </svg>
+                        </button>
+                    </div>
+
                     <input type="text" id="nameInput" placeholder="Track Name (e.g., Opening 1)" class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-neutral-500">
                 </div>
                 
@@ -142,7 +152,7 @@
             </button>
             
             <div id="logContainer" class="hidden mt-2 bg-neutral-950 border border-neutral-800 rounded p-2 h-32 font-mono text-[11px] text-neutral-400 overflow-y-auto text-left whitespace-pre-wrap select-text">
-System ready. Awaiting tasks...
+                System ready. Awaiting tasks...
             </div>
         </div>
     </div>
@@ -293,6 +303,40 @@ System ready. Awaiting tasks...
                     Cancel
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div id="youtubeSearchModal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 transition-opacity backdrop-blur-sm">
+        <div class="bg-neutral-800 border border-neutral-700 rounded-lg p-5 max-w-lg w-full shadow-2xl flex flex-col max-h-[85vh]">
+            
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
+                    🔻 YouTube Native Search
+                </h2>
+                <button onclick="closeYoutubeSearchModal()" class="text-neutral-500 hover:text-neutral-300 transition-colors text-xs">
+                    ✕ Close
+                </button>
+            </div>
+
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="ytSearchQuery" placeholder="Type media theme name (e.g. One Piece Memories)..." 
+                    class="flex-grow bg-neutral-900 border border-neutral-700 rounded px-3 py-1.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-red-500 transition"
+                    onkeydown="if(event.key === 'Enter') executeYoutubeSearch()">
+                <button onclick="executeYoutubeSearch()" class="bg-red-700 hover:bg-red-600 text-white font-medium px-4 py-1.5 rounded text-sm transition active:scale-95 shadow">
+                    Search
+                </button>
+            </div>
+
+            <div id="ytResultsContainer" class="flex-grow max-h-72 overflow-y-auto pr-1 flex flex-col gap-2 custom-scrollbar">
+                <div id="ytPlaceholder" class="text-center py-8 text-xs text-neutral-500 leading-relaxed">
+                    Type what you are looking for above and hit Search.<br>
+                    Results with duration, views, and channel will appear here.
+                </div>
+            </div>
+
+            <button id="btnYtLoadMore" onclick="renderMoreYoutubeResults()" class="hidden w-full text-center py-2 mt-3 text-xs text-neutral-400 bg-neutral-700/30 hover:bg-neutral-700/50 border border-neutral-600/30 rounded transition-all cursor-pointer">
+                👇 Load more results...
+            </button>
         </div>
     </div>
 
