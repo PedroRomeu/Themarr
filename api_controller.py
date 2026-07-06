@@ -251,15 +251,17 @@ class Api:
         except Exception as e:
             print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {anime_folder}: {e}")
 
-    def enhance_local_music(self, target_folder, batch_mode, target_lufs, options=None):
+    def enhance_local_music(self, target_folder, scope, target_lufs, options=None, selected_folders=None):
         if options is None:
             options = {"normalize": True, "metadata": True, "organize": True}
             
         if not target_folder or not os.path.exists(target_folder):
             return {"status": "error", "message": "Invalid directory."}
         
-        if batch_mode:
-            target_folder = self._resolve_smart_folders(target_folder, batch_mode)
+        is_batch = (scope == 'all' or scope == 'selected')
+        
+        if is_batch:
+            target_folder = self._resolve_smart_folders(target_folder, is_batch)
             
         global global_state
         global_state["is_processing"] = True
@@ -267,27 +269,33 @@ class Api:
         global_state["statusText"] = "Starting Enhancement..."
         global_state["percentageText"] = "0%"
 
-        t = threading.Thread(target=self._execute_enhance_thread, args=(target_folder, batch_mode, target_lufs, options))
+        t = threading.Thread(target=self._execute_enhance_thread, args=(target_folder, scope, target_lufs, options, selected_folders))
         t.daemon = True
         t.start()
         
         return {"status": "success", "message": "Enhancement started in background!"}
 
-    def _execute_enhance_thread(self, target_folder, batch_mode, target_lufs, options):
+    def _execute_enhance_thread(self, target_folder, scope, target_lufs, options, selected_folders):
         global global_state
         try:
             print("\n=======================================================")
             print("[ENHANCE] Starting audio enhancement process...")
-            print(f"[ENHANCE] Batch Mode: {'Yes' if batch_mode else 'No'}")
+            print(f"[ENHANCE] Scope Mode: {scope}")
             print(f"[ENHANCE] Target Volume: {target_lufs} LUFS")
             print("=======================================================\n")
 
             affected_files = 0
             folders_to_process = []
             
-            if batch_mode:
+            if scope == 'all':
                 for item in os.listdir(target_folder):
                     item_path = os.path.join(target_folder, item)
+                    if os.path.isdir(item_path):
+                        folders_to_process.append(item_path)
+
+            elif scope == 'selected' and selected_folders:
+                for folder_name in selected_folders:
+                    item_path = os.path.join(target_folder, folder_name)
                     if os.path.isdir(item_path):
                         folders_to_process.append(item_path)
             else:
@@ -351,21 +359,42 @@ class Api:
         finally:
             global_state["is_processing"] = False
         
-    def delete_music_folder(self, root_folder, batch_mode=False):
-            if not root_folder or not os.path.exists(root_folder):
-                return {"status": "error", "message": "Invalid or missing directory."}
+    def delete_music_folder(self, root_folder, scope, selected_folders=None):
+
+        if not root_folder or not os.path.exists(root_folder):
+            return {"status": "error", "message": "Invalid or missing directory."}
         
-            # Apply Mother/Grandmother intelligence
-            target_folder = self._resolve_smart_folders(root_folder, batch_mode)
-        
-            deleted_count = 0
-            try:
-                print(f"\n=======================================================")
-                print(f"[CLEANUP] Starting audio cleanup in: {target_folder}")
-                print(f"[CLEANUP] Mode: {'ALL ANIMES (Grandmother)' if batch_mode else 'CURRENT ANIME (Mother)'}")
-                print(f"=======================================================\n")
+        folders_to_process = []
+        mode_str = ""
+
+        if scope == 'all':
+            target = self._resolve_smart_folders(root_folder, True)
+            folders_to_process.append(target)
+            mode_str = "ALL ANIMES (Grandmother)"
             
-                # Scan everything starting from the target folder
+        elif scope == 'selected' and selected_folders:
+            smart_root = self._resolve_smart_folders(root_folder, True)
+            for folder_name in selected_folders:
+                full_path = os.path.join(smart_root, folder_name)
+                if os.path.exists(full_path):
+                    folders_to_process.append(full_path)
+            mode_str = f"SELECTED ANIMES ({len(folders_to_process)} folders)"
+            
+        else:
+            target = self._resolve_smart_folders(root_folder, False)
+            folders_to_process.append(target)
+            mode_str = "CURRENT ANIME (Mother)"
+    
+        deleted_count = 0
+        try:
+            print(f"\n=======================================================")
+            print(f"[CLEANUP] Starting audio cleanup")
+            print(f"[CLEANUP] Mode: {mode_str}")
+            print(f"=======================================================\n")
+            
+            for target_folder in folders_to_process:
+                print(f"[CLEANUP] Scanning folder: {target_folder}")
+                
                 for root, subfolders, files in os.walk(target_folder):
                     for file in files:
                         if file.lower().endswith('.mp3'):
@@ -373,21 +402,21 @@ class Api:
                             os.remove(full_path)
                             print(f"[CLEANUP] 🗑️ Removed: {file}")
                             deleted_count += 1
-            
-                # Clean up empty "theme-music" folders
+                
                 for root, subfolders, files in os.walk(target_folder, topdown=False):
                     for subfolder in subfolders:
                         if subfolder.lower() == 'theme-music':
                             sub_path = os.path.join(root, subfolder)
                             if not os.listdir(sub_path): 
                                 os.rmdir(sub_path)
-                            
-                print(f"\n[CLEANUP] Done! {deleted_count} file(s) removed.")
-                return {"status": "success", "message": f"Cleaned up! {deleted_count} audio file(s) removed."}
-            
-            except Exception as e:
-                print(f"[CLEANUP] ❌ Error: {e}")
-                return {"status": "error", "message": f"Error during cleanup: {str(e)}"}
+                                print(f"[CLEANUP] 📂 Removed empty folder: theme-music")
+                                
+            print(f"\n[CLEANUP] Done! {deleted_count} file(s) removed.")
+            return {"status": "success", "message": f"Cleaned up! {deleted_count} audio file(s) removed."}
+        
+        except Exception as e:
+            print(f"[CLEANUP] ❌ Error: {e}")
+            return {"status": "error", "message": f"Error during cleanup: {str(e)}"}
 
     def get_status(self):
         global global_state
@@ -633,3 +662,26 @@ class Api:
     def save_settings(self, data):
         save_config(data)
         return True
+
+    def get_subfolders(self, folder_path):
+        import os
+        try:
+            if not folder_path or not os.path.exists(folder_path):
+                return {"status": "error", "folders": [], "selected_anime": ""}
+            
+            root_folder = self._resolve_smart_folders(folder_path, True)
+            
+            subfolders = [f for f in os.listdir(root_folder) if os.path.isdir(os.path.join(root_folder, f))]
+            
+            selected_anime = ""
+            if root_folder.lower() != folder_path.lower():
+                selected_anime = os.path.basename(folder_path)
+                
+            return {
+                "status": "success", 
+                "folders": subfolders, 
+                "selected_anime": selected_anime
+            }
+        except Exception as e:
+            print(f"[ERROR] get_subfolders failed: {str(e)}")
+            return {"status": "error", "folders": [], "selected_anime": ""}

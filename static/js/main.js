@@ -22,11 +22,11 @@ setTimeout(() => {
                     let res = await fetch('/api/status');
                     return await res.json();
                 },
-                delete_music_folder: async (folder, batchMode) => {
+                delete_music_folder: async (folder, scope, selectedFolders) => {
                     let res = await fetch('/api/delete_music_folder', { 
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' }, 
-                        body: JSON.stringify({ folder: folder, batchMode: batchMode }) 
+                        body: JSON.stringify({ folder: folder, scope: scope, selectedFolders: selectedFolders }) 
                     });
                     return await res.json();
                 },
@@ -43,6 +43,14 @@ setTimeout(() => {
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' }, 
                         body: JSON.stringify({ url: url, api_key: api_key }) 
+                    });
+                    return await res.json();
+                },
+                get_subfolders: async (folder) => {
+                    let res = await fetch('/api/get_subfolders', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' }, 
+                        body: JSON.stringify({ folder: folder }) 
                     });
                     return await res.json();
                 }
@@ -99,8 +107,12 @@ function showToast(message, status) {
     }, 3500);
 }
 
-function confirmDelete(batchMode) {
-    if (batchMode) {
+async function triggerDelete(scope) {
+    let selectedFolders = [];
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+
+    if (scope === 'all') {
         let doubleCheck = confirm(
             "⚠️ DOUBLE CHECK WARNING ⚠️\n\n" +
             "You are about to permanently delete ALL audio files from ALL MEDIA in the library.\n" +
@@ -110,8 +122,14 @@ function confirmDelete(batchMode) {
             closeDeleteModal();
             return; 
         }
-    } else {
-        let singleCheck = confirm("Proceed with deleting audio files from the CURRENT MEDIA only?");
+    } else if (scope === 'selected') {
+        if (selectedFolders.length === 0) {
+            showToast("⚠️ No folders selected in the dropdown!", "error");
+            closeDeleteModal();
+            return;
+        }
+        
+        let singleCheck = confirm(`Proceed with deleting audio files from the ${selectedFolders.length} SELECTED folders?`);
         if (!singleCheck) {
             closeDeleteModal();
             return;
@@ -122,9 +140,14 @@ function confirmDelete(batchMode) {
     const folder = document.getElementById('folderPath').innerText;
     showToast("🗑️ Deleting files...", "success");
 
-    if(window.pywebview) {
-        pywebview.api.delete_music_folder(folder, batchMode).then(res => {
+    if (window.pywebview && window.pywebview.api) {
+        window.pywebview.api.delete_music_folder(folder, scope, selectedFolders)
+        .then(res => {
             showToast(res.message || res.mensagem, res.status);
+        })
+        .catch(err => {
+            console.error("Delete Python Error:", err);
+            showToast("❌ Server Error (Check Terminal)", "error");
         });
     }
 }
@@ -147,7 +170,10 @@ async function triggerEnhance(scope) {
     
     const folder = document.getElementById('folderPath').innerText;
     const currentLufs = parseInt(document.getElementById('lufsInput').value) || -24; 
-    const batchMode = (scope === 'all'); 
+    
+    let selectedFolders = [];
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    checkboxes.forEach(chk => selectedFolders.push(chk.value));
     
     const options = {
         normalize: document.getElementById('chkNormalize').checked,
@@ -160,7 +186,7 @@ async function triggerEnhance(scope) {
 
     try {
         if (window.pywebview && window.pywebview.api) {
-            window.pywebview.api.enhance_local_music(folder, batchMode, currentLufs, options)
+            window.pywebview.api.enhance_local_music(folder, scope, currentLufs, options, selectedFolders)
             .then(res => {
                 showToast(res.message || res.mensagem, res.status);
             })
@@ -250,6 +276,41 @@ setInterval(async () => {
     }
 }, 500);
 
+function toggleFolderDropdown() {
+    const dropdown = document.getElementById('folderDropdown');
+    dropdown.classList.toggle('hidden');
+}
+
+function checkAllFolders(state) {
+    const checkboxes = document.querySelectorAll('.folder-checkbox');
+    checkboxes.forEach(chk => chk.checked = state);
+}
+
+async function loadFolderCheckboxes(path) {
+    const container = document.getElementById('folderCheckboxList');
+    container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">Loading...</p>';
+    
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.get_subfolders) {
+        let res = await window.pywebview.api.get_subfolders(path);
+        container.innerHTML = '';
+        
+        if (res.status === 'success' && res.folders && res.folders.length > 0) {
+            res.folders.forEach(folder => {
+                const shouldBeChecked = (res.selected_anime && res.selected_anime === folder) ? 'checked' : '';
+                
+                container.innerHTML += `
+                    <label class="flex items-center gap-2 hover:bg-[#333333] p-1.5 rounded cursor-pointer transition">
+                        <input type="checkbox" value="${folder}" class="folder-checkbox w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800" ${shouldBeChecked}>
+                        <span class="text-xs text-gray-300 truncate">${folder}</span>
+                    </label>
+                `;
+            });
+        } else {
+            container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">No subfolders found.</p>';
+        }
+    }
+}
+
 function selectFolder() {
     if(isProcessing) return; 
     
@@ -272,6 +333,7 @@ function selectFolder() {
             if(response.success || response.sucesso) {
                 let returnedPath = response.path || response.caminho;
                 document.getElementById('folderPath').innerText = returnedPath;
+                loadFolderCheckboxes(returnedPath);
                 globalDestinationOptions = ['Main Theme'];
                 
                 let returnedSeasons = response.seasons || response.temporadas || [];
