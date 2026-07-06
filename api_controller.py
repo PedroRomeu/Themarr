@@ -204,7 +204,9 @@ class Api:
     def _auto_organize_single_season(self, anime_folder):
         try:
             items_in_folder = os.listdir(anime_folder)
-            has_season = any("season" in item.lower() for item in items_in_folder if os.path.isdir(os.path.join(anime_folder, item)))
+            
+            season_folders = [item for item in items_in_folder if os.path.isdir(os.path.join(anime_folder, item)) and "season" in item.lower()]
+            has_season = len(season_folders) > 0
             
             if not has_season:
                 anime_name = os.path.basename(anime_folder)
@@ -222,13 +224,30 @@ class Api:
                         shutil.move(item_path, os.path.join(new_season_path, item))
                         moved_items += 1
                         
-                    elif os.path.isdir(item_path) and item.lower() == "theme-music":
-                        os.makedirs(new_season_path, exist_ok=True)
-                        shutil.move(item_path, os.path.join(new_season_path, item))
-                        moved_items += 1
-                        
                 if moved_items > 0:
                     print(f"\n[AUTO-ORGANIZE] 🧹 {moved_items} item(s) automatically organized into '{new_season_name}'!")
+                    season_folders = [new_season_name] 
+            
+            items_in_folder = os.listdir(anime_folder)
+            
+            has_root_music = False
+            for item in items_in_folder:
+                item_lower = item.lower()
+                if item_lower == "theme-music" and os.path.isdir(os.path.join(anime_folder, item)):
+                    has_root_music = True
+                elif item_lower == "theme.mp3" and os.path.isfile(os.path.join(anime_folder, item)):
+                    has_root_music = True
+                    
+            if not has_root_music and len(season_folders) == 1:
+                only_season_path = os.path.join(anime_folder, season_folders[0])
+                season_items = os.listdir(only_season_path)
+                
+                for s_item in season_items:
+                    if s_item.lower() == "theme-music" and os.path.isdir(os.path.join(only_season_path, s_item)):
+                        shutil.move(os.path.join(only_season_path, s_item), os.path.join(anime_folder, s_item))
+                        print(f"\n[AUTO-ORGANIZE] 🎵 Promoted 'theme-music' from '{season_folders[0]}' to Main Anime Folder!")
+                        break
+                        
         except Exception as e:
             print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {anime_folder}: {e}")
 
@@ -242,12 +261,25 @@ class Api:
         if batch_mode:
             target_folder = self._resolve_smart_folders(target_folder, batch_mode)
             
+        global global_state
+        global_state["is_processing"] = True
+        global_state["percentage"] = 0
+        global_state["statusText"] = "Starting Enhancement..."
+        global_state["percentageText"] = "0%"
+
+        t = threading.Thread(target=self._execute_enhance_thread, args=(target_folder, batch_mode, target_lufs, options))
+        t.daemon = True
+        t.start()
+        
+        return {"status": "success", "message": "Enhancement started in background!"}
+
+    def _execute_enhance_thread(self, target_folder, batch_mode, target_lufs, options):
+        global global_state
         try:
             print("\n=======================================================")
             print("[ENHANCE] Starting audio enhancement process...")
-            print(f"[ENHANCE] Batch Mode (All subfolders): {'Yes' if batch_mode else 'No'}")
+            print(f"[ENHANCE] Batch Mode: {'Yes' if batch_mode else 'No'}")
             print(f"[ENHANCE] Target Volume: {target_lufs} LUFS")
-            print(f"[ENHANCE] Active Options: {options}")
             print("=======================================================\n")
 
             affected_files = 0
@@ -263,9 +295,15 @@ class Api:
 
             current_config = self.get_settings() 
             audio_effects = current_config.get("audio_fx", {})
+            total_folders = len(folders_to_process)
             
-            for anime_folder in folders_to_process:
+            for i, anime_folder in enumerate(folders_to_process):
                 anime_name = os.path.basename(anime_folder)
+                
+                percentage = int((i / total_folders) * 100) if total_folders > 0 else 0
+                global_state["percentage"] = percentage
+                global_state["statusText"] = f"Enhancing: {anime_name}"
+                global_state["percentageText"] = f"{i}/{total_folders} ({percentage}%)"
                 
                 if options.get("organize", True):
                     self._auto_organize_single_season(anime_folder)
@@ -274,7 +312,6 @@ class Api:
                     continue
 
                 mp3s_in_folder = []
-
                 for root, _, files in os.walk(anime_folder):
                     for file in files:
                         if file.lower().endswith('.mp3'):
@@ -285,16 +322,13 @@ class Api:
                     continue 
                 
                 print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {anime_name}")
-
                 normalize_active = options.get("normalize", True)
                 fx_active = options.get("audio_fx", False)
                 
                 for mp3 in mp3s_in_folder:
                     if normalize_active or fx_active:
                         print(f"[ENHANCE] 🎚️ Processing Audio: {os.path.basename(mp3)}")
-                    
                         effs = audio_effects if fx_active else {}
-                    
                         if normalize_audio_ffmpeg(mp3, target_lufs, effs, normalize_enabled=normalize_active):
                             affected_files += 1
                     else:
@@ -307,14 +341,15 @@ class Api:
             print(f"[ENHANCE] Complete! {affected_files} file(s) modified/read.")
             print("=======================================================\n")
             
-            if affected_files > 0 or options.get("organize", True):
-                return {"status": "success", "message": "Done! Process completed successfully."}
-            else:
-                return {"status": "success", "message": "No .mp3 files found to enhance."}
+            global_state["percentage"] = 100
+            global_state["statusText"] = "Enhancement Complete!"
+            global_state["percentageText"] = f"{total_folders}/{total_folders} (100%)"
                 
         except Exception as e:
             print(f"\n[ENHANCE] ❌ Critical error: {e}")
-            return {"status": "error", "message": f"Error: {str(e)}"}
+            global_state["statusText"] = f"Error: {str(e)}"
+        finally:
+            global_state["is_processing"] = False
         
     def delete_music_folder(self, root_folder, batch_mode=False):
             if not root_folder or not os.path.exists(root_folder):
