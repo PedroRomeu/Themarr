@@ -10,7 +10,11 @@ def get_base_path():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
 APP_ROOT_DIR = get_base_path()
-FFMPEG_PATH = os.path.join(APP_ROOT_DIR, 'bin', 'ffmpeg.exe')
+
+if getattr(sys, 'frozen', False):
+    FFMPEG_PATH = os.path.join(APP_ROOT_DIR, '_internal', 'bin', 'ffmpeg.exe')
+else:
+    FFMPEG_PATH = os.path.join(APP_ROOT_DIR, 'bin', 'ffmpeg.exe')
 
 # User profile config folder
 USER_HOME = os.path.expanduser('~')

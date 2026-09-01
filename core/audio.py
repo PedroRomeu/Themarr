@@ -44,23 +44,100 @@ def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_e
     return ",".join(filters)
 
 
-def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None):
+def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None, start_time=None, end_time=None):
+    dir_name, file_name = os.path.split(full_output_path)
+    
+    forbidden_chars = ['|', '*', '?', ':', '"', '<', '>', '/', '\\']
+    for char in forbidden_chars:
+        file_name = file_name.replace(char, '-') 
+        
+    while '  ' in file_name:
+        file_name = file_name.replace('  ', ' ')
+        
+    full_output_path = os.path.join(dir_name, file_name)
+    
     print(f"\n[AUDIO] Enhancing & Normalizing -> {full_output_path}")
     
-    filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects)
+    ss_sec = parse_time_to_seconds(start_time)
+    to_sec = parse_time_to_seconds(end_time)
     
-    command = [
-        FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-        '-i', input_file,
-        '-vn',
-        '-filter:a', filter_chain, 
-        '-b:a', '320k',
-        full_output_path
-    ]
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    subprocess.run(command, check=True, startupinfo=startupinfo)
-    print("[AUDIO] ✨ Success! File is treated and ready.")
+    if ss_sec is not None:
+        print(f"[AUDIO] Trim Start Configured: {ss_sec}s")
+    if to_sec is not None:
+        print(f"[AUDIO] Trim End Configured: {to_sec}s")
+
+    if audio_effects is None:
+        audio_effects = {}
+    else:
+        audio_effects = dict(audio_effects)
+        
+    if ss_sec is not None or to_sec is not None:
+        audio_effects['remove_silence'] = False
+        print("[AUDIO] Manual trim active: forcing 'remove_silence' to False to prevent timeline shifting.")
+
+    temp_trimmed_file = None
+    
+    if ss_sec is not None or to_sec is not None:
+        print("[AUDIO] ✂️ Applying pre-trim to audio file before applying effects...")
+        try:
+            ext = os.path.splitext(input_file)[1] or '.mp3'
+            fd, temp_trimmed_file = tempfile.mkstemp(suffix=ext)
+            os.close(fd)
+            
+            trim_cmd = [FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y']
+            
+            if ss_sec is not None:
+                trim_cmd += ['-ss', str(ss_sec)]
+                
+            if to_sec is not None:
+                start_offset = ss_sec if ss_sec is not None else 0.0
+                duration = to_sec - start_offset
+                trim_cmd += ['-t', str(duration)]
+            
+            trim_cmd += ['-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '320k', temp_trimmed_file]
+            
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            subprocess.run(trim_cmd, check=True, startupinfo=startupinfo)
+            
+            input_file = temp_trimmed_file
+            print("[AUDIO] Pre-trim applied successfully with reset timestamps!")
+            
+        except Exception as trim_err:
+            print(f"[AUDIO] Critical Error during pre-trim: {trim_err}")
+            if temp_trimmed_file and os.path.exists(temp_trimmed_file):
+                try:
+                    os.remove(temp_trimmed_file)
+                except:
+                    pass
+            raise trim_err
+
+    try:
+        filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects)
+        
+        command = [
+            FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
+            '-i', input_file,
+            '-vn',
+            '-filter:a', filter_chain, 
+            '-b:a', '320k',
+            full_output_path
+        ]
+        
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+        subprocess.run(command, check=True, startupinfo=startupinfo)
+        print("[AUDIO] ✨ Success! File is treated, trimmed, normalized and ready.")
+        
+    finally:
+        if temp_trimmed_file and os.path.exists(temp_trimmed_file):
+            try:
+                os.remove(temp_trimmed_file)
+                print("[AUDIO] Cleaned up temporary trim files.")
+            except Exception as cleanup_err:
+                print(f"[AUDIO] Warning: Could not remove temp file: {cleanup_err}")
 
 
 def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_enabled=True):
@@ -93,6 +170,53 @@ def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_
         print(f"[FFMPEG] ❌ Error processing {mp3_path}: {e}")
         if os.path.exists(temp_file): os.remove(temp_file)
         return False
+
+def parse_time_to_seconds(time_str):
+    """Convert time strings like '5', '0:05', '1:08' ou '01:08' in pure seconds (float/int)"""
+    if not time_str:
+        return None
+    time_str = str(time_str).strip()
+    if not time_str:
+        return None
+    
+    if time_str.replace('.', '', 1).isdigit():
+        return float(time_str)
+        
+    parts = time_str.split(':')
+    try:
+        if len(parts) == 2:  
+            min_str, sec_str = parts
+            return int(min_str) * 60 + float(sec_str)
+            
+        elif len(parts) == 3:  
+            hr_str, min_str, sec_str = parts
+            return int(hr_str) * 3600 + int(min_str) * 60 + float(sec_str)
+            
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def get_streaming_url(youtube_url):
+    """Extract the direct audio URL from YouTube and the total duration in seconds (without downloading anything)"""
+    try:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'force_generic_extractor': False
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+            return {
+                "success": True,
+                "url": info.get('url'),
+                "duration": info.get('duration')  # Duração total em segundos
+            }
+    except Exception as e:
+        print(f"[AUDIO] Erro ao extrair stream do YouTube: {e}")
+        return {"success": False, "error": str(e)}
 
 def download_music(youtube_url):
     print(f"\n[DOWNLOAD] Starting download: {youtube_url}")

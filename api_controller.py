@@ -1,12 +1,11 @@
 import os
 import threading
-import tkinter as tk
 import re
 import tempfile
 import webview
 import shutil
 import requests
-from tkinter import filedialog
+import subprocess
 
 from core.config import load_config, save_config, APP_ROOT_DIR
 from core.logger import log_queue
@@ -132,35 +131,47 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
 
 class Api:
     def select_folder(self):
+        folder = ""
+        seasons = []
         try:
-            folder = ""
             if len(webview.windows) > 0:
-                result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+                active_window = next(iter(webview.windows))
+                result = active_window.create_file_dialog(webview.FOLDER_DIALOG)
                 if result:
-                    folder = result[0]
+                    folder = next(iter(result))
             else:
-                root = tk.Tk()
-                root.withdraw() 
-                root.attributes('-topmost', True) 
-                folder = filedialog.askdirectory(title="Select Media Directory")
-                root.destroy()
-            
-            if not folder:
-                return {"success": False, "error": "No folder selected."}
-                
-            seasons = []
-            try:
+                cmd = (
+                    "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null;"
+                    "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog;"
+                    "$dialog.Description = 'Select Media Directory';"
+                    "$dialog.ShowNewFolderButton = $true;"
+                    "if($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath }"
+                )
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", cmd],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                folder = res.stdout.strip()
+
+            if folder and os.path.exists(folder):
                 for item in os.listdir(folder):
-                    if os.path.isdir(os.path.join(folder, item)) and item != "theme-music":
-                        seasons.append(item)
-            except Exception as e:
-                print(f"Error reading folder: {e}")
-                
-            return {"success": True, "path": folder, "seasons": seasons}
-            
+                    item_path = os.path.join(folder, item)
+                    if os.path.isdir(item_path):
+                        item_lower = item.lower()
+                        if "season" in item_lower or "temporada" in item_lower or "specials" in item_lower:
+                            seasons.append(item)
+                seasons.sort()
+
         except Exception as e:
-            print(f"Fatal error in Browse: {e}")
-            return {"success": False, "error": str(e)}
+            print(f"[API] Error selecting folder: {e}")
+            
+        return {
+            "success": bool(folder),
+            "path": folder,
+            "seasons": seasons
+        }
         
     def _resolve_smart_folders(self, folder, batch_mode):
         if not folder: 
@@ -482,7 +493,18 @@ class Api:
                 temp_folder = None
 
             final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-            normalize_and_save(downloaded_file, final_path, lufs, track_fx)
+            
+            start_time = music.get('startTime', None)
+            end_time = music.get('endTime', None)
+            
+            normalize_and_save(
+                downloaded_file, 
+                final_path, 
+                lufs, 
+                track_fx, 
+                start_time=start_time, 
+                end_time=end_time
+            )
             
             if "Season" in destination:
                 move_loose_episodes(root_anime_folder, destination)
@@ -585,7 +607,18 @@ class Api:
                     temp_folder = None
 
                 final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-                normalize_and_save(downloaded_file, final_path, lufs, track_fx)
+                
+                start_time = music.get('startTime', None)
+                end_time = music.get('endTime', None)
+                
+                normalize_and_save(
+                    downloaded_file, 
+                    final_path, 
+                    lufs, 
+                    track_fx, 
+                    start_time=start_time, 
+                    end_time=end_time
+                )
                 
                 global_state["item_statuses"][i] = "completed"
                 print(f"[SUCCESS] {name} finished successfully!")
@@ -732,3 +765,10 @@ class Api:
             return []
             
         return []
+
+    def get_stream_info(self, url):
+        """Retorna o link de streaming direto do YouTube para o player do frontend"""
+        if not url:
+            return {"success": False, "error": "No URL provided"}
+        from core.audio import get_streaming_url
+        return get_streaming_url(url)

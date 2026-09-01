@@ -116,3 +116,10 @@ def register_routes(app, api_system):
         except Exception as e:
             print(f"[FLASK ERROR] YouTube Search failed: {e}")
             return jsonify([])
+
+    @app.route('/api/get_stream_info', methods=['POST'])
+    def get_stream_info():
+        data = request.json or {}
+        url = data.get('url')
+        result = api_system.get_stream_info(url)
+        return jsonify(result)

@@ -214,6 +214,9 @@ let globalDestinationOptions = [];
 let dragStartIndex = null; 
 let isProcessing = false; 
 let isCompleted = false; 
+let currentPlayingIndex = null;
+let queueAudioTimer = null;
+let queueAudioVolume = 0.5;
 
 function toggleModal(modalID) { document.getElementById(modalID).classList.toggle("hidden"); }
 
@@ -410,7 +413,9 @@ function addToQueue() {
         destination: destination, 
         lufs: lufs, 
         status: 'pending',
-        audio_fx: customFx 
+        audio_fx: customFx ,
+        startTime: "",
+        endTime: ""
     });
     
     document.getElementById('linkInput').value = "";
@@ -428,6 +433,13 @@ function addToQueue() {
 
 function removeFromQueue(index) {
     if(isProcessing) return;
+    
+    if (currentPlayingIndex === index) {
+        stopQueueAudio();
+    } else if (currentPlayingIndex > index) {
+        currentPlayingIndex--;
+    }
+    
     musicQueue.splice(index, 1);
     updateQueueUI();
 }
@@ -471,6 +483,7 @@ function updateQueueUI() {
     }
 
     container.innerHTML = "";
+    
     musicQueue.forEach((item, index) => {
         let optionsHTML = '';
         globalDestinationOptions.forEach(op => {
@@ -505,29 +518,103 @@ function updateQueueUI() {
         let dragEnable = isProcessing ? "false" : "true";
         let cursorState = isProcessing ? "cursor-default" : "cursor-move";
 
+        let buttonsHTML = '';
+        if (!isProcessing) {
+            buttonsHTML = `
+                <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+                    <button onclick="toggleTrimDrawer(${index})" class="text-neutral-400 hover:text-blue-400 transition-colors p-1 cursor-pointer" title="Trim/Preview Audio">
+                        ✂️
+                    </button>
+                    <button onclick="removeFromQueue(${index})" class="text-neutral-500 hover:text-red-400 font-bold p-1 cursor-pointer">
+                        ✕
+                    </button>
+                </div>
+            `;
+        }
+
+        let dragHandleHTML = '';
+        if (!isProcessing) {
+            dragHandleHTML = '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>';
+        }
+
         const queueItemHTML = `
         <div id="queue-item-${index}" data-status="${item.status}" draggable="${dragEnable}" 
                 ondragstart="dragStart(${index}, event)" 
                 ondragend="dragEnd(event)"
                 ondragover="dragOver(event)" 
                 ondrop="drop(${index})"
-                class="group flex items-center justify-between bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 p-2 rounded text-sm transition-colors ${cursorState} ${itemOpacity}">
+                class="group flex flex-col bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 p-2 rounded text-sm transition-colors ${cursorState} ${itemOpacity} mb-2">
             
-            ${!isProcessing ? '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>' : ''}
-            
-            <div class="status-icon flex items-center">${statusIcon}</div>
+            <div class="flex items-center justify-between w-full">
+                
+                ${dragHandleHTML}
+                
+                <div class="status-icon flex items-center">${statusIcon}</div>
 
-            <input type="text" value="${item.name}" onchange="editQueueName(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
-                    class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
-            
-            <select onchange="editQueueDestination(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
-                    class="bg-transparent text-neutral-400 text-xs focus:outline-none cursor-pointer w-1/4 px-1 appearance-none hover:text-neutral-300 ${pointerState}">
-                ${optionsHTML}
-            </select>
-            
-            <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${item.link}</span>
-            
-            ${!isProcessing ? `<button onclick="removeFromQueue(${index})" class="text-neutral-500 hover:text-red-400 font-bold ml-1 opacity-0 group-hover:opacity-100 transition-opacity px-2 cursor-pointer">✕</button>` : ''}
+                <input type="text" value="${item.name}" onchange="editQueueName(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                        class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
+                
+                <select onchange="editQueueDestination(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                        class="bg-transparent text-neutral-400 text-xs focus:outline-none cursor-pointer w-1/4 px-1 appearance-none hover:text-neutral-300 ${pointerState}">
+                    ${optionsHTML}
+                </select>
+                
+                <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${item.link}</span>
+                
+                ${buttonsHTML}
+            </div>
+
+            <div id="trimDrawer-${index}" class="trim-drawer w-full border-t border-neutral-700/50" 
+                 draggable="false" 
+                 onmousedown="event.stopPropagation()" 
+                 onpointerdown="event.stopPropagation()"
+                 onmouseenter="document.getElementById('queue-item-${index}').setAttribute('draggable', 'false')"
+                 onmouseleave="document.getElementById('queue-item-${index}').setAttribute('draggable', '${dragEnable}')">
+                <div class="flex flex-col gap-2 mt-2">
+                    
+                     <div class="flex items-center gap-3 bg-neutral-900/60 p-2 rounded border border-neutral-800">
+                        <button id="trimPlayBtn-${index}" onclick="toggleQueuePlay(${index}, '${item.link}')" class="trim-play-btn" title="Play Preview">
+                            ▶
+                        </button>
+                        
+                        <input type="range" id="trimSlider-${index}" min="0" max="100" value="0" step="0.1" 
+                               oninput="seekQueueAudio(${index}, this.value)"
+                               class="trim-slider flex-1">
+                        
+                        <span id="trimTimeLabel-${index}" class="text-[10px] text-neutral-400 font-mono min-w-[65px] text-right">
+                            0:00 / 0:00
+                        </span>
+
+                        <div class="h-4 w-[1px] bg-neutral-700/50"></div>
+
+                        <div class="flex items-center gap-1.5 pl-1">
+                            <span class="text-[11px] text-neutral-500 select-none" title="Volume">🔊</span>
+                            <input type="range" id="trimVolume-${index}" min="0" max="1" step="0.05" value="${queueAudioVolume}" 
+                                   oninput="adjustQueueVolume(this.value)"
+                                   class="w-12 h-1 rounded bg-neutral-700 cursor-pointer accent-blue-500"
+                                   style="height: 4px;">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-1">Start Time (s / MM:SS)</label>
+                            <input type="text" id="trimStart-${index}" value="${item.startTime || ''}" 
+                                   onchange="updateTrimTime(${index}, 'startTime', this.value)"
+                                   placeholder="e.g. 5 or 0:05" 
+                                   class="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-1">End Time (s / MM:SS)</label>
+                            <input type="text" id="trimEnd-${index}" value="${item.endTime || ''}" 
+                                   onchange="updateTrimTime(${index}, 'endTime', this.value)"
+                                   placeholder="e.g. 68 or 1:08" 
+                                   class="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
         `;
         container.innerHTML += queueItemHTML;
@@ -573,6 +660,7 @@ function retrySingleQueueItem(index) {
 }
 
 function startProcessing() {
+    stopQueueAudio();
     if (isCompleted) {
         musicQueue = [];
         document.getElementById('queueContainer').innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
@@ -769,6 +857,8 @@ async function saveAutoSettings() {
 
 let ytLocalCache = [];
 let ytCurrentlyShown = 0;
+let ytSelectedTitle = "";
+let ytSelectedUrl = "";
 
 function openYoutubeSearchModal() {
     document.getElementById('youtubeSearchModal').classList.remove('hidden');
@@ -778,6 +868,21 @@ function openYoutubeSearchModal() {
 }
 
 function closeYoutubeSearchModal() {
+    const player = document.getElementById('ytPreviewPlayer');
+    if (player) player.src = "";
+    
+    const previewContainer = document.getElementById('ytPreviewContainer');
+    if (previewContainer) previewContainer.classList.add('hidden');
+    
+    const modalContainer = document.getElementById('ytModalContainer');
+    if (modalContainer) {
+        modalContainer.classList.remove('max-w-3xl');
+        modalContainer.classList.add('max-w-lg');
+    }
+    
+    ytSelectedTitle = "";
+    ytSelectedUrl = "";
+    
     document.getElementById('youtubeSearchModal').classList.add('hidden');
 }
 
@@ -867,11 +972,226 @@ function renderMoreYoutubeResults() {
 }
 
 function selectYoutubeResult(title, url) {
-    document.getElementById('linkInput').value = url;
-    document.getElementById('nameInput').value = title;
+    previewYoutubeResult(title, url);
+}
+
+function extractYoutubeId(url) {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    if (match && match[2] && match[2].length === 11) {
+        return match[2];
+    }
+    return null;
+}
+
+function previewYoutubeResult(title, url) {
+    ytSelectedTitle = title;
+    ytSelectedUrl = url;
     
-    showToast("🎵 Track selected!", "success");
+    const videoId = extractYoutubeId(url);
+    const player = document.getElementById('ytPreviewPlayer');
+    
+    if (videoId && player) {
+        const appOrigin = window.location.origin;
+        
+        player.src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&origin=${encodeURIComponent(appOrigin)}&enablejsapi=1`;
+    }
+    
+    const titleEl = document.getElementById('ytPreviewTitle');
+    if (titleEl) titleEl.innerText = title;
+    
+    const metaEl = document.getElementById('ytPreviewMeta');
+    if (metaEl) metaEl.innerText = "Click 'Add Theme' to confirm selection.";
+    
+    const container = document.getElementById('ytModalContainer');
+    if (container) {
+        container.classList.remove('max-w-lg');
+        container.classList.add('max-w-3xl');
+    }
+    
+    const previewContainer = document.getElementById('ytPreviewContainer');
+    if (previewContainer) previewContainer.classList.remove('hidden');
+}
+
+function closeYtPreview() {
+    const player = document.getElementById('ytPreviewPlayer');
+    if (player) player.src = "";
+    
+    const previewContainer = document.getElementById('ytPreviewContainer');
+    if (previewContainer) previewContainer.classList.add('hidden');
+    
+    const container = document.getElementById('ytModalContainer');
+    if (container) {
+        container.classList.remove('max-w-3xl');
+        container.classList.add('max-w-lg');
+    }
+    
+    ytSelectedTitle = "";
+    ytSelectedUrl = "";
+}
+
+function confirmYoutubeSelection() {
+    if (!ytSelectedUrl || !ytSelectedTitle) return;
+    
+    document.getElementById('linkInput').value = ytSelectedUrl;
+    document.getElementById('nameInput').value = ytSelectedTitle;
+    
     closeYoutubeSearchModal();
     
-    document.getElementById('nameInput').focus();
+    showToast("Theme successfully selected!", "success");
+}
+
+function toggleTrimDrawer(index) {
+    const drawer = document.getElementById(`trimDrawer-${index}`);
+    if (!drawer) return;
+    
+    if (!drawer.classList.contains('active') && currentPlayingIndex !== null && currentPlayingIndex !== index) {
+        stopQueueAudio();
+    }
+    
+    drawer.classList.toggle('active');
+}
+
+function updateTrimTime(index, field, value) {
+    if (musicQueue[index]) {
+        musicQueue[index][field] = value.trim();
+        console.log(`[QUEUE] Updated music ${index} ${field} to:`, value);
+    }
+}
+
+async function toggleQueuePlay(index, url) {
+    const audioEl = document.getElementById('globalQueueAudio');
+    const playBtn = document.getElementById(`trimPlayBtn-${index}`);
+    const slider = document.getElementById(`trimSlider-${index}`);
+    const timeLabel = document.getElementById(`trimTimeLabel-${index}`);
+    
+    if (currentPlayingIndex === index) {
+        if (!audioEl.paused) {
+            audioEl.pause();
+            playBtn.innerText = "▶";
+            clearInterval(queueAudioTimer);
+        } else {
+            audioEl.play();
+            playBtn.innerText = "⏸";
+            startQueueAudioSync(index);
+        }
+        return;
+    }
+    
+    if (currentPlayingIndex !== null) {
+        stopQueueAudio();
+    }
+    
+    playBtn.innerText = "⏳";
+    playBtn.disabled = true;
+    timeLabel.innerText = "Loading...";
+    
+    try {
+        let streamData;
+        
+        if (window.pywebview && window.pywebview.api) {
+            streamData = await window.pywebview.api.get_stream_info(url);
+        } else {
+            const response = await fetch('/api/get_stream_info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
+            });
+            streamData = await response.json();
+        }
+        
+        if (streamData && streamData.success) {
+            currentPlayingIndex = index;
+            audioEl.src = streamData.url;
+            audioEl.volume = queueAudioVolume;
+            
+            audioEl.oncanplay = () => {
+                playBtn.disabled = false;
+                playBtn.innerText = "⏸";
+                audioEl.play();
+                
+                slider.max = audioEl.duration;
+                slider.value = 0;
+                
+                startQueueAudioSync(index);
+            };
+            
+            audioEl.onended = () => {
+                stopQueueAudio();
+            };
+            
+        } else {
+            alert("Não foi possível carregar a prévia desta música.");
+            playBtn.innerText = "▶";
+            playBtn.disabled = false;
+            timeLabel.innerText = "Error";
+        }
+    } catch (err) {
+        console.error("Erro no player da fila:", err);
+        playBtn.innerText = "▶";
+        playBtn.disabled = false;
+        timeLabel.innerText = "Error";
+    }
+}
+
+function startQueueAudioSync(index) {
+    const audioEl = document.getElementById('globalQueueAudio');
+    const slider = document.getElementById(`trimSlider-${index}`);
+    const timeLabel = document.getElementById(`trimTimeLabel-${index}`);
+    
+    clearInterval(queueAudioTimer);
+    queueAudioTimer = setInterval(() => {
+        if (!audioEl.paused) {
+            slider.value = audioEl.currentTime;
+            timeLabel.innerText = `${formatSeconds(audioEl.currentTime)} / ${formatSeconds(audioEl.duration)}`;
+        }
+    }, 100);
+}
+
+function seekQueueAudio(index, value) {
+    const audioEl = document.getElementById('globalQueueAudio');
+    if (currentPlayingIndex === index) {
+        audioEl.currentTime = value;
+    }
+}
+
+function stopQueueAudio() {
+    const audioEl = document.getElementById('globalQueueAudio');
+    audioEl.pause();
+    audioEl.src = "";
+    clearInterval(queueAudioTimer);
+    
+    if (currentPlayingIndex !== null) {
+        const playBtn = document.getElementById(`trimPlayBtn-${currentPlayingIndex}`);
+        const slider = document.getElementById(`trimSlider-${currentPlayingIndex}`);
+        const timeLabel = document.getElementById(`trimTimeLabel-${currentPlayingIndex}`);
+        
+        if (playBtn) playBtn.innerText = "▶";
+        if (slider) slider.value = 0;
+        if (timeLabel) timeLabel.innerText = "0:00 / 0:00";
+    }
+    
+    currentPlayingIndex = null;
+}
+
+function formatSeconds(seconds) {
+    if (isNaN(seconds)) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function adjustQueueVolume(value) {
+    queueAudioVolume = parseFloat(value);
+    const audioEl = document.getElementById('globalQueueAudio');
+    if (audioEl) {
+        audioEl.volume = queueAudioVolume;
+    }
+    musicQueue.forEach((item, idx) => {
+        const volSlider = document.getElementById(`trimVolume-${idx}`);
+        if (volSlider) {
+            volSlider.value = queueAudioVolume;
+        }
+    });
 }
