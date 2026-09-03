@@ -102,7 +102,14 @@ function showToast(message, status) {
     const toastIcon = document.getElementById('toastIcon');
     
     toastMsg.innerText = message;
-    toastIcon.innerText = status === 'success' || status === 'sucesso' ? '✅' : '❌';
+
+    if (status === 'success' || status === 'sucesso') {
+        toastIcon.innerText = '✅';
+    } else if (status === 'info') {
+        toastIcon.innerText = '⏳';
+    } else {
+        toastIcon.innerText = '❌';
+    }
     
     toast.classList.remove('hidden');
     setTimeout(() => {
@@ -1194,4 +1201,542 @@ function adjustQueueVolume(value) {
             volSlider.value = queueAudioVolume;
         }
     });
+}
+
+let libraryScope = 'selected';
+let libraryData = [];         
+let libraryAudio = new Audio();
+let currentLibPlayingAnimeIdx = null;
+let currentLibPlayingTrackIdx = null;
+let libAudioTimer = null;
+
+function openLibraryModal() {
+    const baseFolder = document.getElementById('folderPath').innerText;
+    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
+        showToast("Please select a Media Directory first!", "error");
+        return;
+    }
+    
+    document.getElementById('libraryModal').classList.remove('hidden');
+    
+    document.getElementById('libLufsInput').value = document.getElementById('lufsInput').value;
+    document.getElementById('libFadeInInput').value = document.getElementById('fadeInInput').value;
+    document.getElementById('libFadeOutInput').value = document.getElementById('fadeOutInput').value;
+    
+    loadLibraryData();
+}
+
+function closeLibraryModal() {
+    stopLibraryAudio();
+    document.getElementById('libraryModal').classList.add('hidden');
+}
+
+function setLibraryScope(scope) {
+    libraryScope = scope;
+    
+    const btnSelected = document.getElementById('libScopeSelected');
+    const btnAll = document.getElementById('libScopeAll');
+    
+    if (scope === 'selected') {
+        btnSelected.className = "px-3 py-1 rounded font-medium text-white bg-blue-600 transition-colors";
+        btnAll.className = "px-3 py-1 rounded font-medium text-neutral-400 hover:text-white transition-colors";
+    } else {
+        btnAll.className = "px-3 py-1 rounded font-medium text-white bg-blue-600 transition-colors";
+        btnSelected.className = "px-3 py-1 rounded font-medium text-neutral-400 hover:text-white transition-colors";
+    }
+    
+    loadLibraryData();
+}
+
+async function loadLibraryData(preserveState = false) {
+    const container = document.getElementById('libraryContainer');
+    
+    let openMediaNames = [];
+    if (preserveState) {
+        document.querySelectorAll('[id^="lib-accordion-body-"]').forEach(body => {
+            if (!body.classList.contains('hidden')) {
+                const animeIdx = parseInt(body.id.replace('lib-accordion-body-', ''));
+                if (libraryData[animeIdx]) {
+                    openMediaNames.push(libraryData[animeIdx].anime_name);
+                }
+            }
+        });
+    }
+
+    if (!preserveState) {
+        container.innerHTML = `
+            <div class="flex flex-col h-full items-center justify-center text-neutral-500 text-xs gap-2">
+                <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                Scanning local files...
+            </div>
+        `;
+    }
+    
+    const baseFolder = document.getElementById('folderPath').innerText;
+    
+    let selectedFolders = [];
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+
+    if (selectedFolders.length === 0) {
+        const folderPathText = document.getElementById('folderPath').innerText;
+        if (folderPathText && folderPathText !== "No folder selected...") {
+            const parts = folderPathText.split(/[\\/]/);
+            const lastPart = parts[parts.length - 1];
+            if (lastPart) {
+                selectedFolders.push(lastPart);
+            }
+        }
+    }
+    
+    try {
+        const response = await fetch('/api/library/list', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                base_path: baseFolder,
+                scope: libraryScope,
+                selected_folders: selectedFolders
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            libraryData = data.library;
+            renderLibrary(openMediaNames);
+        } else {
+            container.innerHTML = `
+                <div class="flex h-full items-center justify-center text-red-500 text-xs">
+                    Error: ${data.message}
+                </div>
+            `;
+        }
+    } catch (err) {
+        console.error("Error loading library data:", err);
+        container.innerHTML = `
+            <div class="flex h-full items-center justify-center text-red-500 text-xs">
+                Could not connect to local server.
+            </div>
+        `;
+    }
+}
+
+function renderLibrary(openMediaNames = []) {
+    const container = document.getElementById('libraryContainer');
+    const summaryLabel = document.getElementById('libSummaryLabel');
+    
+    if (libraryData.length === 0) {
+        container.innerHTML = `
+            <div class="flex h-full items-center justify-center text-neutral-600 text-xs">
+                No folders found matching the current criteria.
+            </div>
+        `;
+        summaryLabel.innerText = "0 folders loaded";
+        return;
+    }
+    
+    summaryLabel.innerText = `${libraryData.length} folder(s) loaded`;
+    container.innerHTML = "";
+    
+    libraryData.forEach((anime, animeIdx) => {
+        const hasTracks = anime.tracks && anime.tracks.length > 0;
+        const trackCount = hasTracks ? anime.tracks.length : 0;
+
+        const isExpanded = openMediaNames.includes(anime.anime_name);
+        
+        const animeCard = document.createElement('div');
+        animeCard.className = "bg-neutral-900/40 border border-neutral-850 rounded-lg overflow-hidden library-anime-card";
+        animeCard.id = `lib-anime-card-${animeIdx}`;
+        
+        animeCard.innerHTML = `
+            <div class="flex items-center justify-between px-4 py-3.5 cursor-pointer select-none" onclick="toggleLibraryAccordion(${animeIdx})">
+                <div class="flex items-center gap-3">
+                    <span id="lib-chevron-${animeIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
+                    <span class="font-semibold text-neutral-200 text-sm tracking-wide">${anime.anime_name}</span>
+                    <span class="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-medium">
+                        ${trackCount} ${trackCount === 1 ? 'track' : 'tracks'}
+                    </span>
+                </div>
+                
+                <div class="flex items-center gap-2" onclick="event.stopPropagation()">
+                    ${hasTracks ? `
+                    <button onclick="applyAllTracksInMedia(${animeIdx})" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors">
+                        ⚡ Apply All
+                    </button>
+                    ` : ''}
+                    <button onclick="runLocalFolderAction('structure', '${anime.anime_name}')" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
+                        📂 Organize Folder
+                    </button>
+                </div>
+            </div>
+            
+            <div id="lib-accordion-body-${animeIdx}" class="library-accordion-content ${isExpanded ? '' : 'hidden'} border-t border-neutral-850 bg-neutral-950/40 px-4 py-3 space-y-2">
+                ${hasTracks ? '' : `<p class="text-xs text-neutral-600 py-1 text-center">No downloaded tracks inside this anime folder.</p>`}
+                
+                <div class="space-y-2" id="lib-tracks-list-${animeIdx}"></div>
+            </div>
+        `;
+        
+        container.appendChild(animeCard);
+        
+        if (hasTracks) {
+            const tracksList = document.getElementById(`lib-tracks-list-${animeIdx}`);
+            anime.tracks.forEach((track, trackIdx) => {
+                track.normalize = (track.normalize !== undefined) ? track.normalize : true;
+                track.fades = (track.fades !== undefined) ? track.fades : true;
+                track.tag = (track.tag !== undefined) ? track.tag : true;
+                
+                const trackRow = document.createElement('div');
+                trackRow.className = "flex flex-col gap-2 bg-neutral-900/30 border border-neutral-850/60 p-3 rounded-md";
+                
+                trackRow.innerHTML = `
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                        <div class="flex items-center gap-3 min-w-[200px] flex-1">
+                            <button id="libPlayBtn-${animeIdx}-${trackIdx}" onclick="toggleLibraryTrackPlay(${animeIdx}, ${trackIdx}, '${encodeURIComponent(track.file_path)}')" class="lib-play-btn" title="Play Preview">
+                                ▶
+                            </button>
+                            <div class="flex flex-col">
+                                <input type="text" value="${track.file_name}" 
+                                oninput="updateLibraryTrackNameInMemory(${animeIdx}, ${trackIdx}, this.value)"
+                                onmousedown="event.stopPropagation()"
+                                onpointerdown="event.stopPropagation()"
+                                class="bg-transparent border-b border-transparent hover:border-neutral-800/80 focus:border-blue-500 focus:outline-none text-xs font-semibold text-neutral-200 px-1 py-0.5 rounded transition-all max-w-xs break-all"
+                                title="Click to rename file">
+                                <span class="text-[9px] text-neutral-500 font-bold uppercase tracking-wider">${track.location_type}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center gap-1.5 bg-neutral-950/60 p-1 rounded border border-neutral-850 text-[10px]">
+                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'normalize')" id="pill-norm-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.normalize ? 'active' : ''}">
+                                LUFS
+                            </span>
+                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'fades')" id="pill-fade-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.fades ? 'active' : ''}">
+                                FADES
+                            </span>
+                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'tag')" id="pill-tag-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.tag ? 'active' : ''}">
+                                TAGS
+                            </span>
+                        </div>
+                        
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleLibTrimDrawer(${animeIdx}, ${trackIdx})" class="p-1.5 hover:bg-neutral-800 border border-transparent hover:border-neutral-800 text-neutral-400 hover:text-blue-400 rounded transition-colors" title="Trim Audio">
+                                ✂️
+                            </button>
+                            <button onclick="processSingleLibraryTrack(${animeIdx}, ${trackIdx})" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors">
+                                Apply
+                            </button>
+                            <button onclick="deleteSingleLibraryTrack(${animeIdx}, ${trackIdx})" class="p-1.5 hover:bg-red-950/30 border border-transparent hover:border-red-900/30 text-neutral-500 hover:text-red-400 rounded transition-colors" title="Delete Track">
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="libPlaybackPanel-${animeIdx}-${trackIdx}" class="hidden flex items-center gap-3 bg-neutral-950/50 p-2 rounded border border-neutral-850 text-xs"
+                         onmousedown="event.stopPropagation()"
+                         onpointerdown="event.stopPropagation()">
+                        <input type="range" id="libSlider-${animeIdx}-${trackIdx}" min="0" max="100" value="0" step="0.1" 
+                               oninput="seekLibraryAudio(${animeIdx}, ${trackIdx}, this.value)"
+                               class="trim-slider flex-1">
+                        
+                        <span id="libTimeLabel-${animeIdx}-${trackIdx}" class="text-[10px] text-neutral-400 font-mono min-w-[65px] text-right">
+                            0:00 / 0:00
+                        </span>
+
+                        <div class="h-4 w-[1px] bg-neutral-800"></div>
+
+                        <div class="flex items-center gap-1.5 pl-1">
+                            <span class="text-[11px] text-neutral-500 select-none" title="Volume">🔊</span>
+                            <input type="range" id="libVolume-${animeIdx}-${trackIdx}" min="0" max="1" step="0.05" value="${queueAudioVolume}" 
+                                   oninput="adjustLibraryVolume(this.value)"
+                                   class="w-12 h-1 rounded bg-neutral-700 cursor-pointer accent-blue-500"
+                                   style="height: 4px;">
+                        </div>
+                    </div>
+
+                    <div id="libTrimDrawer-${animeIdx}-${trackIdx}" class="hidden border-t border-neutral-850/60 pt-2.5 mt-1">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[9px] uppercase tracking-wider text-neutral-400 font-bold mb-1">Start Time (s / MM:SS)</label>
+                                <input type="text" id="libTrimStart-${animeIdx}-${trackIdx}" value="${track.startTime || '0'}" 
+                                       onchange="updateLibTrimTime(${animeIdx}, ${trackIdx}, 'startTime', this.value)"
+                                       placeholder="e.g. 5 or 0:05" 
+                                       class="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-[9px] uppercase tracking-wider text-neutral-400 font-bold mb-1">End Time (s / MM:SS)</label>
+                                <input type="text" id="libTrimEnd-${animeIdx}-${trackIdx}" value="${track.endTime || ''}" 
+                                       onchange="updateLibTrimTime(${animeIdx}, ${trackIdx}, 'endTime', this.value)"
+                                       placeholder="e.g. 68 or 1:08" 
+                                       class="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                tracksList.appendChild(trackRow);
+            });
+        }
+    });
+}
+
+function toggleLibraryAccordion(animeIdx) {
+    const body = document.getElementById(`lib-accordion-body-${animeIdx}`);
+    const chevron = document.getElementById(`lib-chevron-${animeIdx}`);
+    
+    if (body.classList.contains('hidden')) {
+        body.classList.remove('hidden');
+        chevron.style.transform = "rotate(90deg)";
+    } else {
+        body.classList.add('hidden');
+        chevron.style.transform = "rotate(0deg)";
+    }
+}
+
+function toggleLibPill(animeIdx, trackIdx, type) {
+    const track = libraryData[animeIdx].tracks[trackIdx];
+    track[type] = !track[type];
+    
+    const pillId = type === 'normalize' ? `pill-norm-${animeIdx}-${trackIdx}` :
+                   type === 'fades' ? `pill-fade-${animeIdx}-${trackIdx}` :
+                   `pill-tag-${animeIdx}-${trackIdx}`;
+                   
+    const pill = document.getElementById(pillId);
+    if (track[type]) {
+        pill.classList.add('active');
+    } else {
+        pill.classList.remove('active');
+    }
+}
+
+function toggleLibTrimDrawer(animeIdx, trackIdx) {
+    const drawer = document.getElementById(`libTrimDrawer-${animeIdx}-${trackIdx}`);
+    drawer.classList.toggle('hidden');
+}
+
+function updateLibTrimTime(animeIdx, trackIdx, boundType, value) {
+    libraryData[animeIdx].tracks[trackIdx][boundType] = value;
+}
+
+function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
+    const isSameTrack = (currentLibPlayingAnimeIdx === animeIdx && currentLibPlayingTrackIdx === trackIdx);
+    const playBtn = document.getElementById(`libPlayBtn-${animeIdx}-${trackIdx}`);
+    const playbackPanel = document.getElementById(`libPlaybackPanel-${animeIdx}-${trackIdx}`);
+    
+    if (isSameTrack && !libraryAudio.paused) {
+        libraryAudio.pause();
+        playBtn.innerText = "▶";
+        return;
+    }
+    
+    if (isSameTrack && libraryAudio.paused) {
+        libraryAudio.play();
+        playBtn.innerText = "⏸";
+        return;
+    }
+    
+    stopLibraryAudio();
+    
+    currentLibPlayingAnimeIdx = animeIdx;
+    currentLibPlayingTrackIdx = trackIdx;
+    
+    playbackPanel.classList.remove('hidden');
+    playBtn.innerText = "⏸";
+    
+    const slider = document.getElementById(`libSlider-${animeIdx}-${trackIdx}`);
+    const timeLabel = document.getElementById(`libTimeLabel-${animeIdx}-${trackIdx}`);
+
+    const formatLibTime = (secs) => {
+        if (isNaN(secs) || !isFinite(secs)) return "0:00";
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    libraryAudio.onloadedmetadata = () => {
+        timeLabel.innerText = `0:00 / ${formatLibTime(libraryAudio.duration)}`;
+    };
+
+    libraryAudio.ontimeupdate = () => {
+        if (!libraryAudio.duration || !isFinite(libraryAudio.duration)) return;
+        const current = libraryAudio.currentTime;
+        const total = libraryAudio.duration;
+        slider.value = (current / total) * 100;
+        timeLabel.innerText = `${formatLibTime(current)} / ${formatLibTime(total)}`;
+    };
+
+    libraryAudio.onended = () => {
+        stopLibraryAudio();
+    };
+
+    libraryAudio.src = `/api/library/stream?path=${encodedPath}&v=${Date.now()}`;
+    libraryAudio.volume = queueAudioVolume;
+    libraryAudio.play();
+}
+
+function stopLibraryAudio() {
+    if (libAudioTimer) {
+        clearInterval(libAudioTimer);
+        libAudioTimer = null;
+    }
+    
+    libraryAudio.pause();
+    
+    if (currentLibPlayingAnimeIdx !== null && currentLibPlayingTrackIdx !== null) {
+        const playBtn = document.getElementById(`libPlayBtn-${currentLibPlayingAnimeIdx}-${currentLibPlayingTrackIdx}`);
+        const playbackPanel = document.getElementById(`libPlaybackPanel-${currentLibPlayingAnimeIdx}-${currentLibPlayingTrackIdx}`);
+        
+        if (playBtn) playBtn.innerText = "▶";
+        if (playbackPanel) playbackPanel.classList.add('hidden');
+    }
+    
+    currentLibPlayingAnimeIdx = null;
+    currentLibPlayingTrackIdx = null;
+}
+
+function seekLibraryAudio(animeIdx, trackIdx, value) {
+    if (currentLibPlayingAnimeIdx === animeIdx && currentLibPlayingTrackIdx === trackIdx && libraryAudio.duration) {
+        const targetTime = (parseFloat(value) / 100) * libraryAudio.duration;
+        libraryAudio.currentTime = targetTime;
+    }
+}
+
+function syncLibrarySettings() {
+    document.getElementById('lufsInput').value = document.getElementById('libLufsInput').value;
+    document.getElementById('fadeInInput').value = document.getElementById('libFadeInInput').value;
+    document.getElementById('fadeOutInput').value = document.getElementById('libFadeOutInput').value;
+    saveAutoSettings();
+}
+
+function updateLibraryTrackNameInMemory(animeIdx, trackIdx, newName) {
+    if (!libraryData[animeIdx] || !libraryData[animeIdx].tracks[trackIdx]) return;
+    libraryData[animeIdx].tracks[trackIdx].new_name = newName.trim();
+}
+
+async function processSingleLibraryTrack(animeIdx, trackIdx, autoReload = true) {
+    stopLibraryAudio();
+    const track = libraryData[animeIdx].tracks[trackIdx];
+    
+    let finalNewName = track.new_name || track.file_name;
+    if (finalNewName && !finalNewName.toLowerCase().endsWith('.mp3')) {
+        finalNewName += '.mp3';
+    }
+
+    const btn = document.querySelector(`#lib-tracks-list-${animeIdx} > div:nth-child(${trackIdx + 1}) button[onclick^="processSingleLibraryTrack"]`);
+    if (!btn || btn.disabled) return;
+
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = "⏳";
+    btn.className = "px-3 py-1 bg-neutral-800 text-neutral-500 rounded text-[11px] font-semibold cursor-not-allowed";
+
+    showToast(`Processing track: ${track.file_name}...`, "info");
+
+    try {
+        const response = await fetch('/api/library/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: track.file_path,
+                new_name: finalNewName,
+                normalize: track.normalize,
+                fades: track.fades,
+                tag: track.tag,
+                startTime: track.startTime,
+                endTime: track.endTime
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`${finalNewName} processed successfully!`, "success");
+            btn.innerText = "✅";
+            btn.className = "px-3 py-1 bg-green-900/30 border border-green-800 text-green-400 rounded text-[11px] font-semibold";
+            
+            if (autoReload) {
+                setTimeout(() => {
+                    loadLibraryData(true);
+                }, 1000);
+            }
+            
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerText = originalText;
+                btn.className = "px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors";
+            }, 3000);
+            
+            return true;
+        } else {
+            showToast(`Error: ${data.message}`, "error");
+            btn.disabled = false;
+            btn.innerText = "❌";
+            btn.className = "px-3 py-1 bg-red-900/30 border border-red-800 text-red-400 rounded text-[11px] font-semibold";
+            return false;
+        }
+    } catch (err) {
+        console.error(err);
+        showToast("Connection to server failed.", "error");
+        btn.disabled = false;
+        btn.innerText = originalText;
+        btn.className = "px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors";
+        return false;
+    }
+}
+
+async function deleteSingleLibraryTrack(animeIdx, trackIdx) {
+    const track = libraryData[animeIdx].tracks[trackIdx];
+    if (confirm(`Are you sure you want to permanently delete: ${track.file_name}?`)) {
+        try {
+            const response = await fetch('/api/library/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: track.file_path })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showToast("File deleted successfully.", "success");
+                loadLibraryData();
+            } else {
+                showToast(`Error deleting file: ${data.message}`, "error");
+            }
+        } catch (err) {
+            console.error(err);
+            showToast("Connection error.", "error");
+        }
+    }
+}
+
+async function runBulkLibraryAction(actionType) {
+    console.log(`Running bulk library action: ${actionType}`);
+}
+
+async function runLocalFolderAction(actionType, folderName) {
+    console.log(`Running action ${actionType} on folder: ${folderName}`);
+}
+
+function adjustLibraryVolume(value) {
+    queueAudioVolume = parseFloat(value);
+    libraryAudio.volume = queueAudioVolume;
+    
+    document.querySelectorAll('[id^="libVolume-"]').forEach(slider => {
+        slider.value = queueAudioVolume;
+    });
+    document.querySelectorAll('[id^="trimVolume-"]').forEach(slider => {
+        slider.value = queueAudioVolume;
+    });
+}
+
+async function applyAllTracksInMedia(mediaIdx) {
+    const media = libraryData[mediaIdx];
+    if (!media || !media.tracks || media.tracks.length === 0) return;
+    
+    showToast(`Applying changes to all tracks in: ${media.anime_name}...`, "info");
+    
+    stopLibraryAudio();
+    
+    const promises = media.tracks.map((_, trackIdx) => processSingleLibraryTrack(mediaIdx, trackIdx, false));
+    await Promise.all(promises);
+    
+    setTimeout(() => {
+        loadLibraryData(true);
+    }, 1000);
 }

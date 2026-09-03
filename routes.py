@@ -1,3 +1,4 @@
+import os
 import queue
 from flask import render_template, jsonify, request
 
@@ -123,3 +124,71 @@ def register_routes(app, api_system):
         url = data.get('url')
         result = api_system.get_stream_info(url)
         return jsonify(result)
+
+    @app.route('/api/library/list', methods=['POST'])
+    def get_local_library():
+        data = request.json or {}
+        base_path = data.get('base_path', '')
+        scope = data.get('scope', 'all')
+        selected_folders = data.get('selected_folders', [])
+        
+        result = api_system.list_local_library(base_path, scope, selected_folders)
+        return jsonify(result)
+
+    @app.route('/api/library/stream')
+    def stream_local_file():
+        file_path = request.args.get('path')
+        if not file_path or not os.path.exists(file_path):
+            return "File not found", 404
+            
+        from flask import send_file
+        return send_file(file_path, mimetype="audio/mpeg")
+
+    @app.route('/api/library/process', methods=['POST'])
+    def process_library_track():
+        data = request.json or {}
+        file_path = data.get('file_path', '')
+        new_name = data.get('new_name', '') # <-- Extrai com segurança
+        normalize = data.get('normalize', True)
+        fades = data.get('fades', True)
+        tag = data.get('tag', True)
+        start_time = data.get('startTime', '')
+        end_time = data.get('endTime', '')
+        
+        from core.config import load_config
+        config = load_config()
+        
+        target_lufs = float(config.get('lufs', -24))
+        
+        audio_effects = {
+            "enabled": fades,
+            "remove_silence": False if (start_time or end_time) else config.get('audio_fx', {}).get('remove_silence', False),
+            "fade_in": float(config.get('audio_fx', {}).get('fade_in', 0)) if fades else 0,
+            "fade_out": float(config.get('audio_fx', {}).get('fade_out', 0)) if fades else 0,
+            "start_time": start_time if start_time else None,
+            "end_time": end_time if end_time else None
+        }
+        
+        # Chamada usando argumentos nomeados (evita TypeErrors de posições de argumentos)
+        result = api_system.process_local_file(
+            file_path=file_path,
+            target_lufs=target_lufs,
+            audio_effects=audio_effects,
+            normalize_enabled=normalize,
+            tag_enabled=tag,
+            new_name=new_name
+        )
+        return jsonify(result)
+
+    @app.route('/api/library/delete', methods=['POST'])
+    def delete_library_track():
+        data = request.json or {}
+        file_path = data.get('file_path', '')
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({"success": False, "message": "File not found."})
+            
+        try:
+            os.remove(file_path)
+            return jsonify({"success": True, "message": "File deleted."})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})

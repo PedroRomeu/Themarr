@@ -767,8 +767,208 @@ class Api:
         return []
 
     def get_stream_info(self, url):
-        """Retorna o link de streaming direto do YouTube para o player do frontend"""
+        """Return the direct streaming URL for a given YouTube link."""
         if not url:
             return {"success": False, "error": "No URL provided"}
         from core.audio import get_streaming_url
         return get_streaming_url(url)
+
+    def list_local_library(self, base_path, scope="all", selected_folders=None):
+        """
+        Scan media folders and return a structured list of available anime and their associated theme music tracks.
+        Detects intelligently if the inserted path is the media root or a specific anime folder.
+        """
+        if not base_path or not os.path.exists(base_path):
+            return {"success": False, "message": "Media Directory not found or not selected."}
+            
+        if selected_folders is None:
+            selected_folders = []
+            
+        is_single_anime = False
+        if os.path.exists(os.path.join(base_path, "theme.mp3")):
+            is_single_anime = True
+        elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
+            is_single_anime = True
+        else:
+            try:
+                for item in os.listdir(base_path):
+                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
+                        is_single_anime = True
+                        break
+            except Exception:
+                pass
+                
+        if is_single_anime:
+            real_root_path = os.path.dirname(base_path)
+            selected_folders = [os.path.basename(base_path)]
+        else:
+            real_root_path = base_path
+            
+        library_data = []
+        
+        try:
+            all_items = os.listdir(real_root_path)
+            anime_folders = [d for d in all_items if os.path.isdir(os.path.join(real_root_path, d))]
+            
+            for folder in anime_folders:
+                if scope == "selected" and folder not in selected_folders:
+                    continue
+                    
+                anime_path = os.path.join(real_root_path, folder)
+                tracks = []
+                
+                single_theme_path = os.path.join(anime_path, "theme.mp3")
+                if os.path.exists(single_theme_path):
+                    duration = 0.0
+                    try:
+                        from mutagen.mp3 import MP3
+                        audio = MP3(single_theme_path)
+                        duration = audio.info.length
+                    except Exception as e:
+                        print(f"[LIBRARY] Error reading theme.mp3 in {folder}: {e}")
+                        
+                    tracks.append({
+                        "file_name": "theme.mp3",
+                        "file_path": single_theme_path,
+                        "location_type": "Main Theme (Single)",
+                        "duration": duration,
+                        "startTime": "0",
+                        "endTime": f"{int(duration)}" if duration > 0 else "0"
+                    })
+                
+                root_theme_folder = os.path.join(anime_path, "theme-music")
+                if os.path.exists(root_theme_folder) and os.path.isdir(root_theme_folder):
+                    for file in os.listdir(root_theme_folder):
+                        if file.lower().endswith('.mp3'):
+                            file_path = os.path.join(root_theme_folder, file)
+                            duration = 0.0
+                            try:
+                                from mutagen.mp3 import MP3
+                                audio = MP3(file_path)
+                                duration = audio.info.length
+                            except Exception as e:
+                                print(f"[LIBRARY] Error reading root theme-music {file}: {e}")
+                                
+                            tracks.append({
+                                "file_name": file,
+                                "file_path": file_path,
+                                "location_type": "Main Theme (Folder)",
+                                "duration": duration,
+                                "startTime": "0",
+                                "endTime": f"{int(duration)}" if duration > 0 else "0"
+                            })
+                            
+                try:
+                    for subitem in os.listdir(anime_path):
+                        subitem_path = os.path.join(anime_path, subitem)
+                        if os.path.isdir(subitem_path):
+                            season_theme_folder = os.path.join(subitem_path, "theme-music")
+                            if os.path.exists(season_theme_folder) and os.path.isdir(season_theme_folder):
+                                for file in os.listdir(season_theme_folder):
+                                    if file.lower().endswith('.mp3'):
+                                        file_path = os.path.join(season_theme_folder, file)
+                                        duration = 0.0
+                                        try:
+                                            from mutagen.mp3 import MP3
+                                            audio = MP3(file_path)
+                                            duration = audio.info.length
+                                        except Exception as e:
+                                            print(f"[LIBRARY] Error reading season track {file}: {e}")
+                                            
+                                        tracks.append({
+                                            "file_name": file,
+                                            "file_path": file_path,
+                                            "location_type": f"{subitem}",
+                                            "duration": duration,
+                                            "startTime": "0",
+                                            "endTime": f"{int(duration)}" if duration > 0 else "0"
+                                        })
+                except Exception as e:
+                    print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
+                
+                library_data.append({
+                    "anime_name": folder,
+                    "folder_path": anime_path,
+                    "tracks": tracks
+                })
+                
+            library_data.sort(key=lambda x: x["anime_name"].lower())
+            return {"success": True, "library": library_data}
+            
+        except Exception as e:
+            print(f"[LIBRARY] Error listing library: {e}")
+            return {"success": False, "message": str(e)}
+
+    def process_local_file(self, file_path, target_lufs, audio_effects, normalize_enabled, tag_enabled, new_name=None):
+        """
+        Trims, normalizes, applies fades, and injects metadata on local MP3 files.
+        """
+        if not file_path or not os.path.exists(file_path):
+            return {"success": False, "message": "Target file not found."}
+            
+        try:
+            from core.audio import normalize_audio_ffmpeg
+            normalize_audio_ffmpeg(file_path, target_lufs, audio_effects, normalize_enabled)
+            
+            # Executa a renomeação física do arquivo apenas se o nome mudou
+            old_base = os.path.basename(file_path)
+            print(f"[LIBRARY] Rename check - Old Name: '{old_base}', New Name: '{new_name}'")
+            
+            if new_name and old_base != new_name:
+                new_file_path = os.path.join(os.path.dirname(file_path), new_name)
+                print(f"[LIBRARY] Renaming physical file from '{file_path}' to '{new_file_path}'")
+                
+                # Evita colisões caso um arquivo com esse novo nome já exista
+                if os.path.exists(new_file_path):
+                    print(f"[LIBRARY] Target file already exists. Removing: '{new_file_path}'")
+                    os.remove(new_file_path)
+                    
+                os.rename(file_path, new_file_path)
+                file_path = new_file_path  # Mantém a referência atualizada para a injeção de tags
+                print(f"[LIBRARY] Rename completed successfully!")
+            else:
+                print(f"[LIBRARY] Rename skipped (name matches or empty new_name)")
+            
+            if tag_enabled:
+                parts = file_path.split(os.sep)
+                anime_folder_path = None
+                
+                if parts[-1].lower() == "theme.mp3":
+                    anime_folder_path = os.path.dirname(file_path)
+                elif len(parts) >= 2 and parts[-2].lower() == "theme-music":
+                    anime_folder_path = os.path.dirname(os.path.dirname(file_path))
+                    
+                if anime_folder_path:
+                    anime_name = os.path.basename(anime_folder_path)
+                    config = load_config()
+                    
+                    if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
+                        from core.jellyfin import fetch_jellyfin_data
+                        jf_data = fetch_jellyfin_data(anime_name, config["jelly_url"], config["jelly_api"])
+                        
+                        if jf_data and jf_data.get("id"):
+                            title = os.path.splitext(parts[-1])
+                            album = anime_name
+                            genre = "Anime"
+                            
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                img_url = f"{config['jelly_url'].rstrip('/')}/Items/{jf_data['id']}/Images/Primary?format=jpg"
+                                img_path = os.path.join(temp_dir, "cover.jpg")
+                                
+                                try:
+                                    headers = {"X-Emby-Token": config["jelly_api"]}
+                                    res = requests.get(img_url, headers=headers, timeout=5)
+                                    if res.status_code == 200:
+                                        with open(img_path, 'wb') as f:
+                                            f.write(res.content)
+                                        
+                                        from core.audio import inject_mp3_metadata
+                                        inject_mp3_metadata(file_path, img_path, title, album, genre)
+                                except Exception as e:
+                                    print(f"[LIBRARY] Artwork injection error: {e}")
+                                    
+            return {"success": True, "message": "Track processed!"}
+            
+        except Exception as e:
+            print(f"[LIBRARY] Processing execution error: {e}")
+            return {"success": False, "message": str(e)}

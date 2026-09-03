@@ -141,35 +141,82 @@ def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=
 
 
 def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_enabled=True):
-    """Processing version for local files (Batch Mode / Enhance)"""
-    temp_file = mp3_path + ".temp.mp3"
+    """
+    Processing version for local files (Batch Mode / Enhance) with in-place saving
+    """
+    if audio_effects is None:
+        audio_effects = {}
+
+    start_time = audio_effects.get("start_time")
+    end_time = audio_effects.get("end_time")
+
+    ss_sec = parse_time_to_seconds(start_time)
+    to_sec = parse_time_to_seconds(end_time)
+
+    dir_name, file_name = os.path.split(mp3_path)
+    temp_output = os.path.join(dir_name, f"temp_proc_{file_name}")
     
-    filter_chain = build_audio_filter_chain(mp3_path, target_lufs, audio_effects, normalize_enabled)
-    
-    command = [
-        FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-        '-i', mp3_path,
-        '-vn',
-        '-filter:a', filter_chain, 
-        '-b:a', '320k',
-        temp_file
-    ]
+    input_file = mp3_path
+    temp_trimmed_file = None
+
+    if ss_sec is not None or to_sec is not None:
+        try:
+            ext = os.path.splitext(input_file)[1] or '.mp3'
+            fd, temp_trimmed_file = tempfile.mkstemp(suffix=ext)
+            os.close(fd)
+            
+            trim_cmd = [FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y']
+            
+            if ss_sec is not None:
+                trim_cmd += ['-ss', str(ss_sec)]
+                
+            if to_sec is not None:
+                start_offset = ss_sec if ss_sec is not None else 0.0
+                duration = to_sec - start_offset
+                trim_cmd += ['-t', str(duration)]
+            
+            trim_cmd += ['-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '320k', temp_trimmed_file]
+            
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            subprocess.run(trim_cmd, check=True, startupinfo=startupinfo)
+            input_file = temp_trimmed_file
+            
+        except Exception as trim_err:
+            print(f"[AUDIO] Error during local pre-trim: {trim_err}")
+            if temp_trimmed_file and os.path.exists(temp_trimmed_file):
+                try: os.remove(temp_trimmed_file)
+                except: pass
+            raise trim_err
 
     try:
+        filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_enabled)
+        
+        command = [
+            FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
+            '-i', input_file,
+            '-vn',
+            '-filter:a', filter_chain, 
+            '-b:a', '320k',
+            temp_output
+        ]
+        
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
         subprocess.run(command, check=True, startupinfo=startupinfo)
         
-        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-            shutil.move(temp_file, mp3_path)
-            return True
-        else:
-            if os.path.exists(temp_file): os.remove(temp_file)
-            return False
-    except Exception as e:
-        print(f"[FFMPEG] ❌ Error processing {mp3_path}: {e}")
-        if os.path.exists(temp_file): os.remove(temp_file)
-        return False
+        if os.path.exists(temp_output):
+            shutil.move(temp_output, mp3_path)
+            
+    finally:
+        if temp_trimmed_file and os.path.exists(temp_trimmed_file):
+            try: os.remove(temp_trimmed_file)
+            except: pass
+        if os.path.exists(temp_output):
+            try: os.remove(temp_output)
+            except: pass
 
 def parse_time_to_seconds(time_str):
     """Convert time strings like '5', '0:05', '1:08' ou '01:08' in pure seconds (float/int)"""

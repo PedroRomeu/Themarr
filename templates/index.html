@@ -53,8 +53,8 @@
                 <button onclick="openDeleteModal()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
                     🗑️ Clear Folder
                 </button>
-                <button onclick="openEnhanceModal()" class="text-xs text-neutral-500 hover:text-purple-400 transition-colors flex items-center gap-1.5 py-0.5">
-                    ✨ Enhance Themes
+                <button onclick="openLibraryModal()" class="text-xs text-neutral-500 hover:text-blue-400 transition-colors flex items-center gap-1.5 py-0.5">
+                    📂 Manage Library
                 </button>
             </div>
         </section>
@@ -380,6 +380,77 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
     <audio id="globalQueueAudio" class="hidden"></audio>
+
+    <div id="libraryModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+        <div class="bg-neutral-900 border border-neutral-800/80 w-full max-w-5xl h-[85vh] rounded-lg shadow-2xl flex flex-col overflow-hidden">
+            
+            <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-800/60 bg-neutral-900/40">
+                <div class="flex items-center gap-3">
+                    <span class="text-xl text-neutral-400">📂</span>
+                    <div>
+                        <h2 class="text-base font-bold text-neutral-100 tracking-wide">Library Manager</h2>
+                        <p class="text-[11px] text-neutral-500">Manage, trim, and enhance your existing downloaded themes</p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <div class="flex bg-neutral-950 p-0.5 rounded border border-neutral-800/80 text-[11px]">
+                        <button id="libScopeSelected" onclick="setLibraryScope('selected')" class="px-3 py-1 rounded font-medium text-white bg-blue-600 transition-all duration-200 shadow-sm">
+                            Selected Folders
+                        </button>
+                        <button id="libScopeAll" onclick="setLibraryScope('all')" class="px-3 py-1 rounded font-medium text-neutral-400 hover:text-white transition-colors">
+                            All Folders
+                        </button>
+                    </div>
+                    
+                    <button onclick="closeLibraryModal()" class="text-neutral-500 hover:text-neutral-200 text-sm font-mono p-1 transition-colors">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-4 px-6 py-3 border-b border-neutral-800/40 bg-neutral-900/20 text-xs">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="font-bold text-neutral-500 uppercase tracking-wider text-[9px] mr-1">Bulk Actions:</span>
+                    <button onclick="runBulkLibraryAction('normalize')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
+                        🔊 Normalize All
+                    </button>
+                    <button onclick="runBulkLibraryAction('metadata')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
+                        📝 Embed All Metadata
+                    </button>
+                    <button onclick="runBulkLibraryAction('structure')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
+                        📂 Organize Folders
+                    </button>
+                    
+                    <div class="h-4 w-[1px] bg-neutral-800/85 mx-1"></div>
+                    
+                    <span class="font-bold text-neutral-500 uppercase tracking-wider text-[9px] mr-1">Settings:</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-neutral-400 text-[10px]">LUFS:</span>
+                        <input type="number" id="libLufsInput" oninput="syncLibrarySettings()" class="w-10 bg-neutral-950 border border-neutral-800 text-white rounded text-center text-xs py-0.5">
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-neutral-400 text-[10px]">Fade In:</span>
+                        <input type="number" id="libFadeInInput" oninput="syncLibrarySettings()" class="w-10 bg-neutral-950 border border-neutral-800 text-white rounded text-center text-xs py-0.5" min="0">
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-neutral-400 text-[10px]">Fade Out:</span>
+                        <input type="number" id="libFadeOutInput" oninput="syncLibrarySettings()" class="w-10 bg-neutral-950 border border-neutral-800 text-white rounded text-center text-xs py-0.5" min="0">
+                    </div>
+                </div>
+                <div class="text-[11px] text-neutral-500 font-mono" id="libSummaryLabel">
+                    0 folders loaded
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-3 bg-neutral-900/10" id="libraryContainer">
+                <div class="flex h-full items-center justify-center text-neutral-600 text-sm">
+                    No folders loaded.
+                </div>
+            </div>
+            
+        </div>
+    </div>
 
 </body>
 </html>
