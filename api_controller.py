@@ -6,6 +6,8 @@ import webview
 import shutil
 import requests
 import subprocess
+import zipfile
+from datetime import datetime
 
 from core.config import load_config, save_config, APP_ROOT_DIR
 from core.logger import log_queue
@@ -800,7 +802,8 @@ class Api:
                 
         if is_single_anime:
             real_root_path = os.path.dirname(base_path)
-            selected_folders = [os.path.basename(base_path)]
+            if not selected_folders:
+                selected_folders = [os.path.basename(base_path)]
         else:
             real_root_path = base_path
             
@@ -971,4 +974,191 @@ class Api:
             
         except Exception as e:
             print(f"[LIBRARY] Processing execution error: {e}")
+            return {"success": False, "message": str(e)}
+
+    def export_media_backup(self, base_path, scope, selected_folders=None):
+        try:
+            backup_dir = os.path.join(APP_ROOT_DIR, "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            zip_name = f"Themarr_Backup_{timestamp}.zip"
+            zip_path = os.path.join(backup_dir, zip_name)
+            
+            library_res = self.list_local_library(base_path, scope, selected_folders)
+            if not library_res.get("success"):
+                return {"success": False, "message": "Nenhuma música encontrada para exportar."}
+            
+            library_data = library_res["library"]
+            
+            is_single = False
+            if os.path.exists(os.path.join(base_path, "theme.mp3")):
+                is_single = True
+            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
+                is_single = True
+            else:
+                for item in os.listdir(base_path):
+                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
+                        is_single = True
+                        break
+            
+            real_root = os.path.dirname(base_path) if is_single else base_path
+            
+            written_files = 0
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for anime in library_data:
+                    for track in anime["tracks"]:
+                        file_path = track["file_path"]
+                        if os.path.exists(file_path):
+                            arcname = os.path.relpath(file_path, real_root)
+                            zipf.write(file_path, arcname)
+                            written_files += 1
+                                    
+            if written_files == 0:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                return {"success": False, "message": "Nenhum arquivo físico de áudio encontrado para backup."}
+                
+            return {
+                "success": True, 
+                "message": f"Backup exportado com sucesso contendo {written_files} música(s)!",
+                "filename": zip_name
+            }
+        except Exception as e:
+            print(f"[BACKUP] Erro ao exportar: {e}")
+            return {"success": False, "message": str(e)}
+
+    def select_backup_file(self):
+        file_path = ""
+        try:
+            if len(webview.windows) > 0:
+                active_window = next(iter(webview.windows))
+                result = active_window.create_file_dialog(
+                    webview.OPEN_DIALOG, 
+                    file_types=('Zip files (*.zip)', 'All files (*.*)')
+                )
+                if result:
+                    file_path = next(iter(result))
+            else:
+                cmd = (
+                    "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null;"
+                    " $dialog = New-Object System.Windows.Forms.OpenFileDialog;"
+                    " $dialog.Filter = 'Themarr Backup (*.zip)|*.zip';"
+                    " $dialog.Title = 'Select Themarr Backup File';"
+                    " if($dialog.ShowDialog() -eq 'OK') { $dialog.FileName }"
+                )
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", cmd],
+                    capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                file_path = res.stdout.strip()
+        except Exception as e:
+            print(f"[BACKUP] Erro ao selecionar arquivo: {e}")
+        return {"success": bool(file_path), "file_path": file_path}
+
+    def analyze_backup(self, zip_path, base_path):
+        if not zip_path or not os.path.exists(zip_path):
+            return {"success": False, "message": "Arquivo de backup inválido."}
+        if not base_path or not os.path.exists(base_path):
+            return {"success": False, "message": "Diretório de mídias não configurado."}
+            
+        try:
+            temp_dir = tempfile.mkdtemp(prefix="themarr_import_")
+            
+            with zipfile.ZipFile(zip_path, 'r') as zipf:
+                zipf.extractall(temp_dir)
+                
+            is_single = False
+            if os.path.exists(os.path.join(base_path, "theme.mp3")):
+                is_single = True
+            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
+                is_single = True
+            else:
+                for item in os.listdir(base_path):
+                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
+                        is_single = True
+                        break
+            
+            real_dest_root = os.path.dirname(base_path) if is_single else base_path
+            
+            backup_media_folders = []
+            for item in os.listdir(temp_dir):
+                if os.path.isdir(os.path.join(temp_dir, item)):
+                    backup_media_folders.append(item)
+                    
+            missing_folders = []
+            for folder in backup_media_folders:
+                dest_folder_path = os.path.join(real_dest_root, folder)
+                if not os.path.exists(dest_folder_path):
+                    missing_folders.append(folder)
+                    
+            return {
+                "success": True,
+                "missing_folders": missing_folders,
+                "temp_import_id": temp_dir,
+                "media_count": len(backup_media_folders)
+            }
+        except Exception as e:
+            print(f"[BACKUP] Erro ao analisar backup: {e}")
+            return {"success": False, "message": str(e)}
+
+    def finalize_backup_import(self, temp_import_id, base_path, decision, missing_folders):
+        if not temp_import_id or not os.path.exists(temp_import_id):
+            return {"success": False, "message": "Sessão de importação expirou ou é inválida."}
+            
+        try:
+            is_single = False
+            if os.path.exists(os.path.join(base_path, "theme.mp3")):
+                is_single = True
+            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
+                is_single = True
+            else:
+                for item in os.listdir(base_path):
+                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
+                        is_single = True
+                        break
+            
+            real_dest_root = os.path.dirname(base_path) if is_single else base_path
+            
+            imported_count = 0
+            
+            if decision == "cancel":
+                shutil.rmtree(temp_import_id, ignore_errors=True)
+                return {"success": True, "message": "Importação cancelada."}
+                
+            for folder in os.listdir(temp_import_id):
+                temp_folder_path = os.path.join(temp_import_id, folder)
+                if not os.path.isdir(temp_folder_path):
+                    continue
+                    
+                dest_folder_path = os.path.join(real_dest_root, folder)
+                
+                if folder in missing_folders:
+                    if decision == "skip":
+                        continue
+                    elif decision == "create_all":
+                        os.makedirs(dest_folder_path, exist_ok=True)
+                        print(f"[IMPORT] Criando pasta de mídia ausente: '{folder}'")
+                        
+                for root, _, files in os.walk(temp_folder_path):
+                    for file in files:
+                        if file.lower().endswith(".mp3"):
+                            src_file = os.path.join(root, file)
+                            rel_subpath = os.path.relpath(src_file, temp_import_id)
+                            dest_file = os.path.join(real_dest_root, rel_subpath)
+                            
+                            os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                            
+                            shutil.copy2(src_file, dest_file)
+                            imported_count += 1
+                                    
+            shutil.rmtree(temp_import_id, ignore_errors=True)
+            
+            return {
+                "success": True, 
+                "message": f"Importação concluída! Restaurada(s) {imported_count} música(s)."
+            }
+        except Exception as e:
+            print(f"[BACKUP] Erro ao finalizar importação: {e}")
+            shutil.rmtree(temp_import_id, ignore_errors=True)
             return {"success": False, "message": str(e)}

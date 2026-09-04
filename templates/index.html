@@ -421,6 +421,12 @@
                     <button onclick="runBulkLibraryAction('structure')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
                         📂 Organize Folders
                     </button>
+                    <button onclick="exportLibraryBackup()" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 shadow-sm">
+                        📤 Export Backup
+                    </button>
+                    <button onclick="importLibraryBackup()" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 shadow-sm">
+                        📥 Import Backup
+                    </button>
                     
                     <div class="h-4 w-[1px] bg-neutral-800/85 mx-1"></div>
                     
@@ -449,6 +455,34 @@
                 </div>
             </div>
             
+        </div>
+    </div>
+
+    <div id="importBackupModal" class="hidden fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="z-index: 9999;">
+        <div class="bg-neutral-900 border border-neutral-800 w-full max-w-sm p-5 rounded-lg shadow-2xl flex flex-col gap-4 text-neutral-200">
+            <div class="flex items-center gap-3 border-b border-neutral-800 pb-3">
+                <span class="text-xl">⚠️</span>
+                <h3 class="text-xs font-bold text-white uppercase tracking-wider">Missing Media Folders</h3>
+            </div>
+            
+            <p class="text-[11px] text-neutral-400 leading-relaxed">
+                The backup contains themes for the following media folders that do not exist in your active directory. How would you like to proceed?
+            </p>
+            
+            <div id="importMissingFoldersList" class="bg-neutral-950 border border-neutral-850/50 p-2.5 rounded max-h-32 overflow-y-auto space-y-1 scrollbar-thin">
+            </div>
+            
+            <div class="flex flex-col gap-2 pt-1.5">
+                <button onclick="finalizeImportDecision('create_all')" class="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                    📁 Create & Import All
+                </button>
+                <button onclick="finalizeImportDecision('skip_missing')" class="w-full py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 rounded text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                    ⏭️ Import Existing Only (Skip)
+                </button>
+                <button onclick="finalizeImportDecision('cancel')" class="w-full py-2 bg-red-950/20 hover:bg-red-900/30 border border-red-900/30 text-red-400 rounded text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                    ❌ Cancel
+                </button>
+            </div>
         </div>
     </div>
 

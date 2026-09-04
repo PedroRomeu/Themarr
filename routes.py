@@ -148,7 +148,7 @@ def register_routes(app, api_system):
     def process_library_track():
         data = request.json or {}
         file_path = data.get('file_path', '')
-        new_name = data.get('new_name', '') # <-- Extrai com segurança
+        new_name = data.get('new_name', '')
         normalize = data.get('normalize', True)
         fades = data.get('fades', True)
         tag = data.get('tag', True)
@@ -157,7 +157,6 @@ def register_routes(app, api_system):
         
         from core.config import load_config
         config = load_config()
-        
         target_lufs = float(config.get('lufs', -24))
         
         audio_effects = {
@@ -169,7 +168,6 @@ def register_routes(app, api_system):
             "end_time": end_time if end_time else None
         }
         
-        # Chamada usando argumentos nomeados (evita TypeErrors de posições de argumentos)
         result = api_system.process_local_file(
             file_path=file_path,
             target_lufs=target_lufs,
@@ -192,3 +190,66 @@ def register_routes(app, api_system):
             return jsonify({"success": True, "message": "File deleted."})
         except Exception as e:
             return jsonify({"success": False, "message": str(e)})
+
+    @app.route('/api/library/backup/export', methods=['POST'])
+    def api_flask_export_backup():
+        try:
+            data = request.get_json(force=True, silent=True) or {}
+            base_path = data.get('base_path', '')
+            scope = data.get('scope', 'all')
+            selected_folders = data.get('selected_folders', [])
+            
+            result = api_system.export_media_backup(
+                base_path=base_path,
+                scope=scope,
+                selected_folders=selected_folders
+            )
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Export failed: {e}")
+            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+
+    @app.route('/api/library/backup/select_file', methods=['POST'])
+    def api_flask_select_backup_file():
+        try:
+            result = api_system.select_backup_file()
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Select backup file failed: {e}")
+            return jsonify({"success": False, "file_path": ""})
+
+    @app.route('/api/library/backup/analyze', methods=['POST'])
+    def api_flask_analyze_backup():
+        try:
+            data = request.get_json(force=True, silent=True) or {}
+            zip_path = data.get('zip_path', '')
+            base_path = data.get('base_path', '')
+            
+            result = api_system.analyze_backup(
+                zip_path=zip_path,
+                base_path=base_path
+            )
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Analyze backup failed: {e}")
+            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+
+    @app.route('/api/library/backup/finalize', methods=['POST'])
+    def api_flask_finalize_backup():
+        try:
+            data = request.get_json(force=True, silent=True) or {}
+            temp_import_id = data.get('temp_import_id', '')
+            base_path = data.get('base_path', '')
+            decision = data.get('decision', 'cancel')
+            missing_folders = data.get('missing_folders', [])
+            
+            result = api_system.finalize_backup_import(
+                temp_import_id=temp_import_id,
+                base_path=base_path,
+                decision=decision,
+                missing_folders=missing_folders
+            )
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Finalize backup failed: {e}")
+            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})

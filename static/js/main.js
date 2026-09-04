@@ -1740,3 +1740,173 @@ async function applyAllTracksInMedia(mediaIdx) {
         loadLibraryData(true);
     }, 1000);
 }
+
+let activeTempImportId = null;
+let activeMissingFolders = [];
+
+async function exportLibraryBackup() {
+    const baseFolder = document.getElementById('folderPath').innerText;
+    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
+        showToast("Please select a Media Directory first!", "error");
+        return;
+    }
+
+    const confirmMessage = "You are about to export a backup of your media folders along with their theme music tracks.\n\nA compressed ZIP file will be created inside the 'backups' directory.\n\nDo you want to proceed?";
+    if (!confirm(confirmMessage)) {
+        return; 
+    }
+    
+    let selectedFolders = [];
+    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+    
+    if (selectedFolders.length === 0 && libraryScope === 'selected') {
+        const parts = baseFolder.split(/[\\/]/);
+        const lastPart = parts[parts.length - 1];
+        if (lastPart) {
+            selectedFolders.push(lastPart);
+        }
+    }
+    
+    showToast("Generating compressed backup zip...", "info");
+    
+    try {
+        const response = await window.pywebview.api.export_media_backup(baseFolder, libraryScope, selectedFolders);
+        if (response.success) {
+            showToast(`Exported! Saved to backups/${response.filename}`, "success");
+        } else {
+            showToast(`Export failed: ${response.message}`, "error");
+        }
+    } catch (err) {
+        console.error(err);
+        showToast("Backup export failed.", "error");
+    }
+}
+
+async function importLibraryBackup() {
+    const baseFolder = document.getElementById('folderPath').innerText;
+    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
+        showToast("Please select a Media Directory first!", "error");
+        return;
+    }
+
+    showToast("📂 Select backup ZIP file...", "info");
+
+    try {
+        let selectRes;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.select_backup_file) {
+            selectRes = await window.pywebview.api.select_backup_file();
+        } else {
+            const response = await fetch('/api/library/backup/select_file', { method: 'POST' });
+            selectRes = await response.json();
+        }
+
+        if (!selectRes || !selectRes.success || !selectRes.file_path) {
+            showToast("Import cancelled or no file selected.", "info");
+            return;
+        }
+
+        const zipPath = selectRes.file_path;
+        showToast("⏳ Analyzing backup files...", "info");
+
+        let analyzeRes;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.analyze_backup) {
+            analyzeRes = await window.pywebview.api.analyze_backup(zipPath, baseFolder);
+        } else {
+            const response = await fetch('/api/library/backup/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ zip_path: zipPath, base_path: baseFolder })
+            });
+            analyzeRes = await response.json();
+        }
+
+        if (!analyzeRes.success) {
+            showToast("Error analyzing backup: " + analyzeRes.message, "error");
+            return;
+        }
+
+        activeTempImportId = analyzeRes.temp_import_id;
+        activeMissingFolders = analyzeRes.missing_folders;
+
+        if (activeMissingFolders && activeMissingFolders.length > 0) {
+            const listEl = document.getElementById('importMissingFoldersList');
+            if (listEl) {
+                listEl.innerHTML = '';
+                activeMissingFolders.forEach(folder => {
+                    listEl.innerHTML += `
+                        <div class="flex items-center gap-2 text-xs text-neutral-300 py-0.5">
+                            <span class="text-neutral-500 text-[11px]">📁</span>
+                            <span class="truncate font-medium">${folder}</span>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById('importBackupModal').classList.remove('hidden');
+        } else {
+            await finalizeImportDecision("create_all");
+        }
+
+    } catch (err) {
+        console.error("Backup import error:", err);
+        showToast("Backup import analysis failed.", "error");
+    }
+}
+
+async function finalizeImportDecision(decision) {
+    const modal = document.getElementById('importBackupModal');
+    if (modal) modal.classList.add('hidden');
+
+    if (!activeTempImportId) return;
+
+    if (decision === 'cancel') {
+        showToast("Import cancelled.", "info");
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.finalize_backup_import) {
+            await window.pywebview.api.finalize_backup_import(activeTempImportId, "", 'cancel', []);
+        } else {
+            await fetch('/api/library/backup/finalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ temp_import_id: activeTempImportId, base_path: "", decision: 'cancel', missing_folders: [] })
+            });
+        }
+        activeTempImportId = null;
+        activeMissingFolders = [];
+        return;
+    }
+
+    showToast("Restoring music tracks...", "info");
+    const baseFolder = document.getElementById('folderPath').innerText;
+
+    try {
+        let res;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.finalize_backup_import) {
+            res = await window.pywebview.api.finalize_backup_import(activeTempImportId, baseFolder, decision, activeMissingFolders);
+        } else {
+            const response = await fetch('/api/library/backup/finalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    temp_import_id: activeTempImportId,
+                    base_path: baseFolder,
+                    decision: decision,
+                    missing_folders: activeMissingFolders
+                })
+            });
+            res = await response.json();
+        }
+
+        if (res.success) {
+            showToast(res.message, "success");
+            loadLibraryData(true);
+        } else {
+            showToast("Import failed: " + res.message, "error");
+        }
+    } catch (err) {
+        console.error("Finalize import error:", err);
+        showToast("Import execution failed.", "error");
+    } finally {
+        activeTempImportId = null;
+        activeMissingFolders = [];
+    }
+}
