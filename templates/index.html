@@ -49,13 +49,20 @@
                 </div>
                 </div>
             
-            <div class="mt-2 flex gap-3 justify-end px-1">
-                <button onclick="openDeleteModal()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5">
-                    🗑️ Clear Folder
+            <div class="mt-2 flex items-center justify-between w-full px-1">
+                <button onclick="openAssistantModal()" class="px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 text-blue-400 hover:text-blue-300 rounded text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer">
+                    🤖 Theme Assistant
                 </button>
-                <button onclick="openLibraryModal()" class="text-xs text-neutral-500 hover:text-blue-400 transition-colors flex items-center gap-1.5 py-0.5">
-                    📂 Manage Library
-                </button>
+
+                <div class="flex gap-3">
+                    <button onclick="openDeleteModal()" class="text-xs text-neutral-500 hover:text-red-400 transition-colors flex items-center gap-1.5 py-0.5 cursor-pointer">
+                        🗑️ Clear Folder
+                    </button>
+                    <button onclick="openLibraryModal()" class="text-xs text-neutral-500 hover:text-blue-400 transition-colors flex items-center gap-1.5 py-0.5 cursor-pointer">
+                        📂 Manage Library
+                    </button>
+                </div>
+
             </div>
         </section>
 
@@ -482,6 +489,67 @@
                 <button onclick="finalizeImportDecision('cancel')" class="w-full py-2 bg-red-950/20 hover:bg-red-900/30 border border-red-900/30 text-red-400 rounded text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
                     ❌ Cancel
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="assistantModal" class="hidden fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm" style="z-index: 9999;">
+        <div class="bg-neutral-900 border border-neutral-800 w-full max-w-2xl p-6 rounded-lg shadow-2xl flex flex-col gap-4 text-neutral-200">
+            <div class="flex items-center justify-between border-b border-neutral-800 pb-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-2xl">🤖</span>
+                    <div>
+                        <h3 class="text-sm font-bold text-white uppercase tracking-wider">Theme Assistant Wizard</h3>
+                        <p class="text-[10px] text-neutral-500">Scan your library for media folders with 0 tracks and auto-discover themes using Jellyfin precision</p>
+                    </div>
+                </div>
+                <button onclick="closeAssistantModal()" class="text-neutral-500 hover:text-white text-lg font-bold p-1 cursor-pointer">&times;</button>
+            </div>
+            
+            <div id="assistantScanLoader" class="flex flex-col items-center justify-center py-12 gap-3">
+                <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs text-neutral-400 font-medium">Scanning local directories for missing themes...</span>
+            </div>
+
+            <div id="assistantEmptyState" class="hidden flex flex-col items-center justify-center py-12 text-center gap-2">
+                <span class="text-3xl">🎉</span>
+                <span class="text-xs font-semibold text-neutral-300">All media folders already have themes!</span>
+                <span class="text-[11px] text-neutral-500">No missing soundtracks were detected in your active directory.</span>
+            </div>
+
+            <div id="assistantContent" class="hidden flex flex-col gap-4">
+                <p class="text-[11px] text-neutral-400 leading-relaxed">
+                    The following media folders currently have <strong class="text-neutral-200">0 tracks</strong>. Select a theme suggestion from YouTube or search for a custom query:
+                </p>
+
+                <div class="space-y-3 max-h-[320px] overflow-y-auto pr-1 scrollbar-thin" id="assistantMediaList">
+                </div>
+            </div>
+
+            <div id="assistantFooter" class="hidden border-t border-neutral-800 pt-4 flex items-center justify-between">
+                <div class="flex items-center gap-4 text-[11px]">
+                    <label class="flex items-center gap-1.5 cursor-pointer text-neutral-400 hover:text-neutral-200 select-none">
+                        <input type="checkbox" id="assistantChkNormalize" checked class="w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800">
+                        LUFS Normalize
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-neutral-400 hover:text-neutral-200 select-none">
+                        <input type="checkbox" id="assistantChkFades" checked class="w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800">
+                        Fade In/Out
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-neutral-400 hover:text-neutral-200 select-none">
+                        <input type="checkbox" id="assistantChkTags" checked class="w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800">
+                        Jellyfin Artwork & Tags
+                    </label>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <button onclick="closeAssistantModal()" class="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 rounded text-[11px] font-semibold transition-colors cursor-pointer">
+                        Cancel
+                    </button>
+                    <button id="assistantSubmitBtn" onclick="triggerAssistantDownloads()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-blue-900/20">
+                        ⬇️ Download & Apply Selected
+                    </button>
+                </div>
             </div>
         </div>
     </div>

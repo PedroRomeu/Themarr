@@ -253,3 +253,39 @@ def register_routes(app, api_system):
         except Exception as e:
             print(f"[FLASK ERROR] Finalize backup failed: {e}")
             return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+
+    @app.route('/api/library/assistant/scan', methods=['POST'])
+    def api_flask_assistant_scan():
+        try:
+            data = request.json or {}
+            base_path = data.get('base_path', '')
+            scope = data.get('scope', 'all')
+            selected_folders = data.get('selected_folders', [])
+            result = api_system.scan_missing_themes(base_path, scope, selected_folders)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Assistant scan failed: {e}")
+            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})
+
+    @app.route('/api/library/assistant/suggestions', methods=['POST'])
+    def api_flask_assistant_suggestions():
+        try:
+            data = request.json or {}
+            folder_name = data.get('folder_name', '')
+            result = api_system.get_media_theme_suggestions(folder_name)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Assistant suggestions failed: {e}")
+            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})
+
+    @app.route('/api/library/assistant/download', methods=['POST'])
+    def api_flask_assistant_download():
+        try:
+            data = request.json or {}
+            download_list = data.get('download_list', [])
+            base_folder = data.get('base_folder', '')
+            result = api_system.process_assistant_downloads(download_list, base_folder)
+            return jsonify(result)
+        except Exception as e:
+            print(f"[FLASK ERROR] Assistant download failed: {e}")
+            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})

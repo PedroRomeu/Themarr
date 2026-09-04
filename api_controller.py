@@ -13,7 +13,7 @@ from core.config import load_config, save_config, APP_ROOT_DIR
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata
 from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image
-from core.files import generate_destination_path, move_loose_episodes
+from core.files import generate_destination_path, move_loose_episodes, clean_search_name
 
 global_state = {
     "is_processing": False,
@@ -1162,3 +1162,177 @@ class Api:
             print(f"[BACKUP] Erro ao finalizar importação: {e}")
             shutil.rmtree(temp_import_id, ignore_errors=True)
             return {"success": False, "message": str(e)}
+
+    def scan_missing_themes(self, base_path, scope="all", selected_folders=None):
+        try:
+            library_res = self.list_local_library(base_path, "all", None)
+            if not library_res.get("success"):
+                return {"success": False, "message": library_res.get("message", "Failed to scan library.")}
+                
+            library_data = library_res["library"]
+            missing_media = []
+            
+            for item in library_data:
+                if len(item["tracks"]) == 0:
+                    missing_media.append({
+                        "folder_name": item["anime_name"],
+                        "folder_path": item["folder_path"]
+                    })
+                    
+            return {"success": True, "missing_media": missing_media}
+        except Exception as e:
+            print(f"[ASSISTANT] Error scanning missing themes: {e}")
+            return {"success": False, "message": str(e)}
+
+    def get_assistant_search_query(self, folder_name):
+        try:
+            config = self.get_settings()
+            jelly_url = config.get("jelly_url")
+            jelly_api = config.get("jelly_api")
+            
+            official_name = folder_name
+            series_id = None
+            image_url = None
+            genres = ""
+            
+            clean_fallback = clean_search_name(folder_name, remove_year=True)
+            
+            if jelly_url and jelly_api and config.get("jelly_check"):
+                from core.jellyfin import fetch_jellyfin_data
+                search_result = fetch_jellyfin_data(folder_name, jelly_url, jelly_api)
+                if search_result.get("success"):
+                    official_name = search_result.get("official_name")
+                    series_id = search_result.get("series_id")
+                    image_url = search_result.get("image_url")
+                    genres = search_result.get("genres", "")
+            
+            if not official_name or official_name == folder_name:
+                official_name = clean_fallback
+                
+            search_query = f"{official_name} official theme song opening"
+            
+            return {
+                "success": True,
+                "folder_name": folder_name,
+                "official_name": official_name,
+                "search_query": search_query,
+                "image_url": image_url,
+                "genres": genres,
+                "series_id": series_id
+            }
+        except Exception as e:
+            print(f"[ASSISTANT] Error getting search query for {folder_name}: {e}")
+            return {"success": False, "message": str(e)}
+
+    def get_media_theme_suggestions(self, folder_name):
+        try:
+            meta = self.get_assistant_search_query(folder_name)
+            if not meta.get("success"):
+                return {"success": False, "message": meta.get("message")}
+                
+            query = meta["search_query"]
+            yt_results = self.search_youtube(query)
+            top_results = yt_results[:3] if yt_results else []
+            
+            return {
+                "success": True,
+                "folder_name": folder_name,
+                "official_name": meta["official_name"],
+                "search_query": query,
+                "image_url": meta["image_url"],
+                "genres": meta["genres"],
+                "series_id": meta["series_id"],
+                "suggestions": top_results
+            }
+        except Exception as e:
+            print(f"[ASSISTANT] Error getting suggestions for {folder_name}: {e}")
+            return {"success": False, "message": str(e)}
+
+    def process_assistant_downloads(self, download_list, base_folder):
+        global global_state
+        if global_state.get("is_processing", False):
+            return {"success": False, "message": "Themarr is currently processing another task. Please wait."}
+            
+        global_state["is_processing"] = True
+        global_state["percentage"] = 0
+        global_state["statusText"] = "Starting Assistant Downloads..."
+        global_state["percentageText"] = "0%"
+        
+        t = threading.Thread(target=self._execute_assistant_download_thread, args=(download_list, base_folder))
+        t.daemon = True
+        t.start()
+        return {"success": True, "message": "Assistant download started!"}
+
+    def _execute_assistant_download_thread(self, download_list, base_folder):
+        global global_state
+        try:
+            current_config = self.get_settings()
+            audio_effects = current_config.get("audio_fx", {})
+            target_lufs = float(current_config.get("lufs", -24))
+            
+            total = len(download_list)
+            print(f"\n[ASSISTANT] Starting batch download of {total} items...\n")
+            
+            for i, item in enumerate(download_list):
+                folder_name = item["folder_name"]
+                folder_path = item["folder_path"]
+                track_name = item["track_name"]
+                youtube_url = item["youtube_url"]
+                
+                percentage = int((i / total) * 100)
+                global_state["percentage"] = percentage
+                global_state["statusText"] = f"Downloading theme for: {folder_name}"
+                global_state["percentageText"] = f"{i}/{total} ({percentage}%)"
+                
+                downloaded_file = None
+                try:
+                    max_attempts = 2
+                    for attempt in range(max_attempts):
+                        try:
+                            downloaded_file = download_music(youtube_url)
+                            break
+                        except Exception as dl_error:
+                            if attempt == max_attempts - 1:
+                                raise dl_error
+                            print(f"[ASSISTANT] ⚠️ Download attempt {attempt + 1} failed for '{folder_name}'. Retrying...")
+                    
+                    global_state["statusText"] = f"Normalizing theme for: {folder_name}"
+                    
+                    final_path = generate_destination_path(
+                        anime_folder=folder_path,
+                        theme_type="main",
+                        custom_name=track_name,
+                        season_folder=None,
+                        multiple_main=False
+                    )
+                    
+                    normalize_and_save(
+                        downloaded_file,
+                        final_path,
+                        target_lufs,
+                        audio_effects
+                    )
+                    
+                    process_folder_artwork(folder_path, folder_name, current_config)
+                    print(f"[ASSISTANT SUCCESS] Successfully applied theme for: {folder_name}")
+                    
+                except Exception as e:
+                    print(f"[ASSISTANT ERROR] Failed to process {folder_name}: {e}")
+                    
+                finally:
+                    if downloaded_file and os.path.exists(downloaded_file):
+                        try:
+                            os.remove(downloaded_file)
+                        except Exception as ex:
+                            print(f"[ASSISTANT WARNING] Could not remove temp file: {ex}")
+                            
+            global_state["percentage"] = 100
+            global_state["statusText"] = "Assistant downloads complete!"
+            global_state["percentageText"] = f"{total}/{total} (100%)"
+            print("\n[ASSISTANT] Batch download thread finished successfully.\n")
+            
+        except Exception as err:
+            print(f"[ASSISTANT] Critical thread error: {err}")
+            global_state["statusText"] = f"Error: {str(err)}"
+        finally:
+            global_state["is_processing"] = False

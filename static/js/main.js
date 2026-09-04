@@ -1910,3 +1910,320 @@ async function finalizeImportDecision(decision) {
         activeMissingFolders = [];
     }
 }
+
+let assistantAudio = new Audio();
+let assistantPlayingRow = null;
+let assistantMediaList = [];
+
+async function openAssistantModal() {
+    const baseFolder = document.getElementById('folderPath').innerText;
+    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
+        showToast("Please select a Media Directory first!", "error");
+        return;
+    }
+
+    assistantMediaList = [];
+    stopAssistantAudio();
+
+    document.getElementById('assistantModal').classList.remove('hidden');
+    document.getElementById('assistantScanLoader').classList.remove('hidden');
+    document.getElementById('assistantEmptyState').classList.add('hidden');
+    document.getElementById('assistantContent').classList.add('hidden');
+    document.getElementById('assistantFooter').classList.add('hidden');
+
+    try {
+        let res;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.scan_missing_themes) {
+            res = await window.pywebview.api.scan_missing_themes(baseFolder, "all");
+        } else {
+            const response = await fetch('/api/library/assistant/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ base_path: baseFolder, scope: "all" })
+            });
+            res = await response.json();
+        }
+
+        if (!res.success) {
+            showToast("Failed to scan library: " + res.message, "error");
+            closeAssistantModal();
+            return;
+        }
+
+        assistantMediaList = res.missing_media || [];
+        document.getElementById('assistantScanLoader').classList.add('hidden');
+
+        if (assistantMediaList.length === 0) {
+            document.getElementById('assistantEmptyState').classList.remove('hidden');
+            return;
+        }
+
+        document.getElementById('assistantContent').classList.remove('hidden');
+        document.getElementById('assistantFooter').classList.remove('hidden');
+
+        const container = document.getElementById('assistantMediaList');
+        container.innerHTML = '';
+
+        assistantMediaList.forEach((media, idx) => {
+            container.innerHTML += `
+                <div id="assistant-row-${idx}" class="flex flex-col gap-2 p-3 bg-neutral-900/40 hover:bg-neutral-850/30 border border-neutral-800 rounded-md transition-all">
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                        <div class="flex items-center gap-2.5 min-w-[200px] flex-1">
+                            <input type="checkbox" id="assistant-check-${idx}" checked class="w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800 cursor-pointer">
+                            <span class="text-neutral-500 text-[11px]">📁</span>
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-xs font-semibold text-neutral-200 truncate" title="${media.folder_name}">${media.folder_name}</span>
+                                <span id="assistant-meta-${idx}" class="text-[9px] text-neutral-500 font-bold uppercase tracking-wider text-blue-500">Resolving official metadata...</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Dynamic Suggestions area -->
+                        <div id="assistant-sugg-container-${idx}" class="flex items-center gap-2 min-w-[280px] flex-1 justify-end">
+                            <div class="flex items-center gap-1.5 text-[10px] text-neutral-500">
+                                <div class="w-3 h-3 border border-neutral-600 border-t-transparent rounded-full animate-spin"></div>
+                                <span>Finding themes...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        assistantMediaList.forEach((media, idx) => {
+            fetchSuggestionsForMediaRow(media.folder_name, idx);
+        });
+
+    } catch (err) {
+        console.error("Theme Assistant scan error:", err);
+        showToast("Error connecting to local server.", "error");
+        closeAssistantModal();
+    }
+}
+
+function closeAssistantModal() {
+    stopAssistantAudio();
+    document.getElementById('assistantModal').classList.add('hidden');
+}
+
+async function fetchSuggestionsForMediaRow(folderName, idx) {
+    try {
+        let res;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.get_media_theme_suggestions) {
+            res = await window.pywebview.api.get_media_theme_suggestions(folderName);
+        } else {
+            const response = await fetch('/api/library/assistant/suggestions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_name: folderName })
+            });
+            res = await response.json();
+        }
+
+        const suggContainer = document.getElementById(`assistant-sugg-container-${idx}`);
+        const metaEl = document.getElementById(`assistant-meta-${idx}`);
+
+        if (!res.success || !res.suggestions || res.suggestions.length === 0) {
+            metaEl.innerText = "No suggestions found";
+            metaEl.className = "text-[9px] text-red-500 font-bold uppercase tracking-wider";
+            suggContainer.innerHTML = `
+                <span class="text-[10px] text-neutral-500 italic">No themes found. Skip or search manually.</span>
+            `;
+            const chk = document.getElementById(`assistant-check-${idx}`);
+            if (chk) chk.checked = false;
+            return;
+        }
+
+        metaEl.innerText = res.genres ? `${res.genres}` : "Media (No genres)";
+        metaEl.title = `Official Name: ${res.official_name}`;
+
+        let optionsHTML = '';
+        res.suggestions.forEach((sugg, sIdx) => {
+            const escTitle = sugg.title.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+            optionsHTML += `
+                <option value="${sugg.url}" data-title="${escTitle}" class="bg-neutral-900 text-neutral-200">
+                    #${sIdx + 1}: ${sugg.title.substring(0, 42)}... (${sugg.duration})
+                </option>
+            `;
+        });
+
+        const defaultFilename = `${res.official_name} - Theme`;
+
+        suggContainer.innerHTML = `
+            <div class="flex items-center gap-2 w-full justify-end flex-wrap">
+                <input type="text" id="assistant-input-name-${idx}" value="${defaultFilename}" 
+                       class="bg-neutral-950 border border-neutral-800 text-[10px] text-neutral-300 rounded px-2 py-1 w-44 focus:outline-none focus:border-blue-500" 
+                       placeholder="Custom MP3 file name...">
+                       
+                <select id="assistant-select-${idx}" onchange="updateAssistantInputName(${idx})" 
+                        class="bg-neutral-950 border border-neutral-800 text-[10px] text-neutral-400 rounded px-2 py-1 w-48 focus:outline-none cursor-pointer">
+                    ${optionsHTML}
+                </select>
+                
+                <button id="assistant-play-${idx}" onclick="toggleAssistantPreview(${idx})" 
+                        class="w-6 h-6 rounded-full bg-neutral-800 hover:bg-blue-600 border border-neutral-700/50 hover:border-blue-500 text-neutral-400 hover:text-white flex items-center justify-center text-[10px] transition-all cursor-pointer shadow-sm" 
+                        title="Preview Audio">
+                    ▶
+                </button>
+            </div>
+        `;
+
+        updateAssistantInputName(idx);
+
+    } catch (err) {
+        console.error(`Error suggestions for index ${idx}:`, err);
+        const suggContainer = document.getElementById(`assistant-sugg-container-${idx}`);
+        if (suggContainer) {
+            suggContainer.innerHTML = `<span class="text-[10px] text-red-500">Error fetching suggestions</span>`;
+        }
+    }
+}
+
+function updateAssistantInputName(idx) {
+    const select = document.getElementById(`assistant-select-${idx}`);
+    if (!select) return;
+    const selectedOption = select.options[select.selectedIndex];
+    const originalTitle = selectedOption.getAttribute('data-title');
+    const input = document.getElementById(`assistant-input-name-${idx}`);
+    
+    if (input) {
+        let cleanName = originalTitle
+            .replace(/[\\/\\|\\*\\?:\"<>]/g, '-')
+            .replace(/\\s+/g, ' ')
+            .trim();
+        
+        cleanName = cleanName.replace(/\\(Official Video\\)|\\(Official Audio\\)|Official Music Video|HD|1080p|Full/gi, '').trim();
+        input.value = cleanName;
+    }
+}
+
+async function toggleAssistantPreview(idx) {
+    const select = document.getElementById(`assistant-select-${idx}`);
+    if (!select) return;
+    const url = select.value;
+    const playBtn = document.getElementById(`assistant-play-${idx}`);
+
+    if (assistantPlayingRow === idx) {
+        if (!assistantAudio.paused) {
+            assistantAudio.pause();
+            playBtn.innerText = "▶";
+            playBtn.classList.remove('bg-blue-600', 'text-white', 'border-blue-500');
+            playBtn.classList.add('bg-neutral-800', 'text-neutral-400', 'border-neutral-700/50');
+        } else {
+            assistantAudio.play();
+            playBtn.innerText = "⏸";
+        }
+        return;
+    }
+
+    stopAssistantAudio();
+    playBtn.innerText = "⏳";
+    playBtn.disabled = true;
+
+    try {
+        let streamData;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.get_stream_info) {
+            streamData = await window.pywebview.api.get_stream_info(url);
+        } else {
+            const response = await fetch('/api/get_stream_info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
+            });
+            streamData = await response.json();
+        }
+
+        if (streamData && streamData.success) {
+            assistantPlayingRow = idx;
+            assistantAudio.src = streamData.url;
+            assistantAudio.volume = queueAudioVolume;
+            
+            assistantAudio.oncanplay = () => {
+                playBtn.disabled = false;
+                playBtn.innerText = "⏸";
+                playBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-500');
+                playBtn.classList.remove('bg-neutral-800', 'text-neutral-400', 'border-neutral-700/50');
+                assistantAudio.play();
+            };
+
+            assistantAudio.onended = () => {
+                stopAssistantAudio();
+            };
+        } else {
+            showToast("Could not load preview stream.", "error");
+            playBtn.innerText = "▶";
+            playBtn.disabled = false;
+        }
+    } catch (err) {
+        console.error("Assistant preview play error:", err);
+        playBtn.innerText = "▶";
+        playBtn.disabled = false;
+    }
+}
+
+function stopAssistantAudio() {
+    assistantAudio.pause();
+    assistantAudio.src = "";
+    if (assistantPlayingRow !== null) {
+        const playBtn = document.getElementById(`assistant-play-${assistantPlayingRow}`);
+        if (playBtn) {
+            playBtn.innerText = "▶";
+            playBtn.classList.remove('bg-blue-600', 'text-white', 'border-blue-500');
+            playBtn.classList.add('bg-neutral-800', 'text-neutral-400', 'border-neutral-700/50');
+            playBtn.disabled = false;
+        }
+    }
+    assistantPlayingRow = null;
+}
+
+async function triggerAssistantDownloads() {
+    const baseFolder = document.getElementById('folderPath').innerText;
+    const downloadList = [];
+
+    assistantMediaList.forEach((media, idx) => {
+        const chk = document.getElementById(`assistant-check-${idx}`);
+        if (chk && chk.checked) {
+            const select = document.getElementById(`assistant-select-${idx}`);
+            const input = document.getElementById(`assistant-input-name-${idx}`);
+            if (select && input) {
+                downloadList.push({
+                    folder_name: media.folder_name,
+                    folder_path: media.folder_path,
+                    track_name: input.value.trim(),
+                    youtube_url: select.value
+                });
+            }
+        }
+    });
+
+    if (downloadList.length === 0) {
+        showToast("⚠️ Please select at least one media folder to download!", "error");
+        return;
+    }
+
+    closeAssistantModal();
+    showToast("🤖 Auto-downloads started in the background!", "success");
+
+    try {
+        let res;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.process_assistant_downloads) {
+            res = await window.pywebview.api.process_assistant_downloads(downloadList, baseFolder);
+        } else {
+            const response = await fetch('/api/library/assistant/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ download_list: downloadList, base_folder: baseFolder })
+            });
+            res = await response.json();
+        }
+
+        if (res.success) {
+            isProcessing = true;
+            isCompleted = false;
+        } else {
+            showToast("Failed to initiate downloads: " + res.message, "error");
+        }
+    } catch (err) {
+        console.error("Trigger assistant downloads error:", err);
+        showToast("Server communication error.", "error");
+    }
+}
