@@ -30,11 +30,11 @@ setTimeout(() => {
                     });
                     return await res.json();
                 },
-                enhance_local_music: async (folder, batchMode, lufs, options) => {
-                    let res = await fetch('/api/enhance_local_music', { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'application/json' }, 
-                        body: JSON.stringify({ folder: folder, batchMode: batchMode, lufs: lufs, options: options }) 
+                enhance_local_music: async (folder, scope, lufs, options, selectedFolders) => {
+                    let res = await fetch('/api/enhance_local_music', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ folder: folder, scope: scope, lufs: lufs, options: options, selectedFolders: selectedFolders })
                     });
                     return await res.json();
                 },
@@ -73,6 +73,16 @@ const START_BTN_IDLE_CLASS = "w-full bg-neutral-800 text-neutral-500 py-3 rounde
 const START_BTN_READY_CLASS = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
 const SPINNER_SVG = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
 const EMPTY_QUEUE_HTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
+
+// Escapes text placed inside HTML attributes or element content
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function getMediaFolder() {
     return document.getElementById('folderPath').innerText;
@@ -575,7 +585,7 @@ function updateQueueUI() {
                 
                 <div class="status-icon flex items-center">${statusIcon}</div>
 
-                <input type="text" value="${item.name}" onchange="editQueueName(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
+                <input type="text" value="${escapeHtml(item.name)}" onchange="editQueueName(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
                         class="bg-transparent text-white font-semibold focus:outline-none focus:border-b focus:border-blue-500 w-1/4 px-1 truncate cursor-text ml-2 ${pointerState}">
                 
                 <select onchange="editQueueDestination(${index}, this.value)" ${isProcessing ? 'disabled' : ''}
@@ -583,7 +593,7 @@ function updateQueueUI() {
                     ${optionsHTML}
                 </select>
                 
-                <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${item.link}</span>
+                <span class="text-blue-400 text-xs truncate flex-grow text-right px-2 opacity-60">${escapeHtml(item.link)}</span>
                 
                 ${buttonsHTML}
             </div>
@@ -597,7 +607,7 @@ function updateQueueUI() {
                 <div class="flex flex-col gap-2 mt-2">
                     
                      <div class="flex items-center gap-3 bg-neutral-900/60 p-2 rounded border border-neutral-800">
-                        <button id="trimPlayBtn-${index}" onclick="toggleQueuePlay(${index}, '${item.link}')" class="trim-play-btn" title="Play Preview">
+                        <button id="trimPlayBtn-${index}" onclick="toggleQueuePlay(${index}, musicQueue[${index}].link)" class="trim-play-btn" title="Play Preview">
                             ▶
                         </button>
                         
@@ -771,6 +781,10 @@ window.finalizeProcessingUI = function() {
     });
 
     updateQueueUI();
+
+    if (!document.getElementById('libraryModal').classList.contains('hidden')) {
+        loadLibraryData(true);
+    }
 };
 
 async function testConnection() {
@@ -959,18 +973,17 @@ function renderMoreYoutubeResults() {
         const row = document.createElement('div');
         row.className = "flex items-center justify-between p-2.5 bg-neutral-900/40 hover:bg-neutral-700/40 border border-neutral-700/30 rounded-md transition-all cursor-pointer group";
         
-        const escapedTitle = item.title.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-        row.setAttribute('onclick', `selectYoutubeResult('${escapedTitle}', '${item.url}')`);
+        row.addEventListener('click', () => selectYoutubeResult(item.title, item.url));
         
         row.innerHTML = `
             <div class="flex items-center gap-3 overflow-hidden">
                 <div class="flex-shrink-0 relative">
-                    <img src="${item.thumbnail}" alt="Capa" class="w-14 h-10 object-cover rounded shadow-sm border border-neutral-700/50">
+                    <img src="${escapeHtml(item.thumbnail)}" alt="Capa" class="w-14 h-10 object-cover rounded shadow-sm border border-neutral-700/50">
                 </div>
                 
                 <div class="flex flex-col pr-3 truncate">
-                    <span class="text-xs font-medium text-neutral-200 group-hover:text-white transition truncate">${item.title}</span>
-                    <span class="text-[10px] text-neutral-500 truncate">${item.channel}</span>
+                    <span class="text-xs font-medium text-neutral-200 group-hover:text-white transition truncate">${escapeHtml(item.title)}</span>
+                    <span class="text-[10px] text-neutral-500 truncate">${escapeHtml(item.channel)}</span>
                 </div>
             </div>
 
@@ -1268,17 +1281,7 @@ async function loadLibraryData(preserveState = false) {
     }
     
     const baseFolder = getMediaFolder();
-    const selectedFolders = getCheckedFolders();
-
-    if (selectedFolders.length === 0) {
-        if (baseFolder && baseFolder !== NO_FOLDER_TEXT) {
-            const parts = baseFolder.split(/[\\/]/);
-            const lastPart = parts[parts.length - 1];
-            if (lastPart) {
-                selectedFolders.push(lastPart);
-            }
-        }
-    }
+    const selectedFolders = hasMediaFolder() ? getLibrarySelection() : getCheckedFolders();
     
     try {
         const response = await fetch('/api/library/list', {
@@ -1343,7 +1346,7 @@ function renderLibrary(openMediaNames = []) {
             <div class="flex items-center justify-between px-4 py-3.5 cursor-pointer select-none" onclick="toggleLibraryAccordion(${animeIdx})">
                 <div class="flex items-center gap-3 min-w-0 flex-1">
                     <span id="lib-chevron-${animeIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200 flex-shrink-0" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
-                    <span class="font-semibold text-neutral-200 text-sm tracking-wide truncate" title="${anime.anime_name}">${anime.anime_name}</span>
+                    <span class="font-semibold text-neutral-200 text-sm tracking-wide truncate" title="${escapeHtml(anime.anime_name)}">${escapeHtml(anime.anime_name)}</span>
                     <span class="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap">
                         ${trackCount} ${trackCount === 1 ? 'track' : 'tracks'}
                     </span>
@@ -1355,7 +1358,7 @@ function renderLibrary(openMediaNames = []) {
                         ⚡ Apply All
                     </button>
                     ` : ''}
-                    <button onclick="runLocalFolderAction('structure', '${anime.anime_name}')" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
+                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
                         📂 Organize Folder
                     </button>
                 </div>
@@ -1383,11 +1386,11 @@ function renderLibrary(openMediaNames = []) {
                 trackRow.innerHTML = `
                     <div class="flex items-center justify-between gap-3 flex-wrap">
                         <div class="flex items-center gap-3 min-w-[200px] flex-1">
-                            <button id="libPlayBtn-${animeIdx}-${trackIdx}" onclick="toggleLibraryTrackPlay(${animeIdx}, ${trackIdx}, '${encodeURIComponent(track.file_path)}')" class="lib-play-btn" title="Play Preview">
+                            <button id="libPlayBtn-${animeIdx}-${trackIdx}" onclick="toggleLibraryTrackPlay(${animeIdx}, ${trackIdx})" class="lib-play-btn" title="Play Preview">
                                 ▶
                             </button>
                             <div class="flex flex-col">
-                                <input type="text" value="${track.file_name}" 
+                                <input type="text" value="${escapeHtml(track.file_name)}"  
                                 oninput="updateLibraryTrackNameInMemory(${animeIdx}, ${trackIdx}, this.value)"
                                 onmousedown="event.stopPropagation()"
                                 onpointerdown="event.stopPropagation()"
@@ -1508,7 +1511,7 @@ function updateLibTrimTime(animeIdx, trackIdx, boundType, value) {
     libraryData[animeIdx].tracks[trackIdx][boundType] = value;
 }
 
-function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
+function toggleLibraryTrackPlay(animeIdx, trackIdx) {
     const isSameTrack = (currentLibPlayingAnimeIdx === animeIdx && currentLibPlayingTrackIdx === trackIdx);
     const playBtn = document.getElementById(`libPlayBtn-${animeIdx}-${trackIdx}`);
     const playbackPanel = document.getElementById(`libPlaybackPanel-${animeIdx}-${trackIdx}`);
@@ -1552,6 +1555,7 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
         stopLibraryAudio();
     };
 
+    const encodedPath = encodeURIComponent(libraryData[animeIdx].tracks[trackIdx].file_path);
     libraryAudio.src = `/api/library/stream?path=${encodedPath}&v=${Date.now()}`;
     libraryAudio.volume = queueAudioVolume;
     libraryAudio.play();
@@ -1684,12 +1688,53 @@ async function deleteSingleLibraryTrack(animeIdx, trackIdx) {
     }
 }
 
-async function runBulkLibraryAction(actionType) {
-    console.log(`Running bulk library action: ${actionType}`);
+const LIBRARY_ACTIONS = {
+    normalize: { label: "normalize the volume of", options: { normalize: true, audio_fx: false, metadata: false, organize: false } },
+    metadata: { label: "embed metadata and artwork into", options: { normalize: false, audio_fx: false, metadata: true, organize: false } },
+    structure: { label: "organize the folder structure of", options: { normalize: false, audio_fx: false, metadata: false, organize: true } }
+};
+
+// Folders the Library Manager is showing: checked folders, or the current one when nothing is checked
+function getLibrarySelection() {
+    const selectedFolders = getCheckedFolders();
+    if (selectedFolders.length === 0) {
+        const lastPart = getMediaFolder().split(/[\\/]/).pop();
+        if (lastPart) selectedFolders.push(lastPart);
+    }
+    return selectedFolders;
 }
 
-async function runLocalFolderAction(actionType, folderName) {
-    console.log(`Running action ${actionType} on folder: ${folderName}`);
+async function startLibraryEnhance(actionType, scope, selectedFolders, targetDescription) {
+    const action = LIBRARY_ACTIONS[actionType];
+    if (!action) return;
+    if (isProcessing) {
+        showToast("Themarr is busy with another task. Please wait.", "error");
+        return;
+    }
+    if (!confirm(`This will ${action.label} ${targetDescription}.\n\nDo you want to proceed?`)) return;
+
+    stopLibraryAudio();
+    const lufs = parseInt(document.getElementById('libLufsInput').value) || -24;
+
+    try {
+        const res = await window.pywebview.api.enhance_local_music(getMediaFolder(), scope, lufs, action.options, selectedFolders);
+        showToast(res.message, res.status);
+    } catch (err) {
+        console.error("Library action error:", err);
+        showToast("❌ Server Error (Check Terminal)", "error");
+    }
+}
+
+async function runBulkLibraryAction(actionType) {
+    const selectedFolders = libraryScope === 'all' ? [] : getLibrarySelection();
+    const target = libraryScope === 'all' ? "ALL media folders" : `${selectedFolders.length} selected folder(s)`;
+    await startLibraryEnhance(actionType, libraryScope, selectedFolders, target);
+}
+
+async function runLocalFolderAction(actionType, animeIdx) {
+    const media = libraryData[animeIdx];
+    if (!media) return;
+    await startLibraryEnhance(actionType, 'selected', [media.anime_name], `'${media.anime_name}'`);
 }
 
 function adjustLibraryVolume(value) {
@@ -1890,7 +1935,7 @@ async function openAssistantModal() {
                             <input type="checkbox" id="assistant-check-${idx}" checked class="w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800 cursor-pointer">
                             <span class="text-neutral-500 text-[11px]">📁</span>
                             <div class="flex flex-col min-w-0">
-                                <span class="text-xs font-semibold text-neutral-200 truncate" title="${media.folder_name}">${media.folder_name}</span>
+                                <span class="text-xs font-semibold text-neutral-200 truncate" title="${escapeHtml(media.folder_name)}">${escapeHtml(media.folder_name)}</span>
                                 <span id="assistant-meta-${idx}" class="text-[9px] text-neutral-500 font-bold uppercase tracking-wider text-blue-500">Resolving official metadata...</span>
                             </div>
                         </div>
@@ -1945,10 +1990,9 @@ async function fetchSuggestionsForMediaRow(folderName, idx) {
         metaEl.title = `Official Name: ${res.official_name}`;
 
         const optionsHTML = res.suggestions.map((sugg, sIdx) => {
-            const escTitle = sugg.title.replace(/"/g, '&quot;').replace(/'/g, "\\'");
             return `
-                <option value="${sugg.url}" data-title="${escTitle}" class="bg-neutral-900 text-neutral-200">
-                    #${sIdx + 1}: ${sugg.title.substring(0, 42)}... (${sugg.duration})
+                <option value="${escapeHtml(sugg.url)}" data-title="${escapeHtml(sugg.title)}" class="bg-neutral-900 text-neutral-200">
+                    #${sIdx + 1}: ${escapeHtml(sugg.title.substring(0, 42))}... (${sugg.duration})
                 </option>
             `;
         }).join('');
@@ -1957,7 +2001,7 @@ async function fetchSuggestionsForMediaRow(folderName, idx) {
 
         suggContainer.innerHTML = `
             <div class="flex items-center gap-2 w-full justify-end flex-wrap">
-                <input type="text" id="assistant-input-name-${idx}" value="${defaultFilename}" 
+                <input type="text" id="assistant-input-name-${idx}" value="${escapeHtml(defaultFilename)}"  
                        class="bg-neutral-950 border border-neutral-800 text-[10px] text-neutral-300 rounded px-2 py-1 w-44 focus:outline-none focus:border-blue-500" 
                        placeholder="Custom MP3 file name...">
                        
@@ -1993,13 +2037,12 @@ function updateAssistantInputName(idx) {
     const input = document.getElementById(`assistant-input-name-${idx}`);
     
     if (input) {
-        let cleanName = originalTitle
-            .replace(/[\\/\\|\\*\\?:\"<>]/g, '-')
-            .replace(/\\s+/g, ' ')
+        input.value = originalTitle
+            .replace(/[\[(]\s*(Official (Music )?Video|Official Audio)\s*[\])]|Official Music Video|\b(HD|1080p|Full)\b/gi, '')
+            .replace(/[\[(]\s*[\])]/g, '')
+            .replace(/[\\/|*?:"<>]/g, '-')
+            .replace(/\s+/g, ' ')
             .trim();
-        
-        cleanName = cleanName.replace(/\\(Official Video\\)|\\(Official Audio\\)|Official Music Video|HD|1080p|Full/gi, '').trim();
-        input.value = cleanName;
     }
 }
 
@@ -2101,8 +2144,13 @@ async function triggerAssistantDownloads() {
     showToast("🤖 Auto-downloads started in the background!", "success");
 
     try {
-        const res = await callBackend('process_assistant_downloads', [downloadList, baseFolder], '/api/library/assistant/download',
-            { download_list: downloadList, base_folder: baseFolder });
+        const options = {
+            normalize: document.getElementById('assistantChkNormalize').checked,
+            fades: document.getElementById('assistantChkFades').checked,
+            tags: document.getElementById('assistantChkTags').checked
+        };
+        const res = await callBackend('process_assistant_downloads', [downloadList, baseFolder, options], '/api/library/assistant/download',
+            { download_list: downloadList, base_folder: baseFolder, options: options });
 
         if (res.success) {
             isProcessing = true;

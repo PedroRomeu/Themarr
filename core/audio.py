@@ -98,7 +98,7 @@ def _encode_with_filters(input_file, filter_chain, output_path):
     ])
 
 
-def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None, start_time=None, end_time=None):
+def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None, start_time=None, end_time=None, normalize_enabled=True):
     dir_name, file_name = os.path.split(full_output_path)
 
     forbidden_chars = ['|', '*', '?', ':', '"', '<', '>', '/', '\\']
@@ -136,7 +136,7 @@ def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=
         print("[AUDIO] Pre-trim applied successfully with reset timestamps!")
 
     try:
-        filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects)
+        filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_enabled)
         _encode_with_filters(input_file, filter_chain, full_output_path)
         print("[AUDIO] ✨ Success! File is treated, trimmed, normalized and ready.")
 

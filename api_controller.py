@@ -24,7 +24,7 @@ global_state = {
     "item_statuses": [] 
 }
 
-def process_folder_artwork(anime_folder_path, anime_folder_name, config):
+def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_file=None):
     print(f"\n[AUTOMATION] 🎬 Starting metadata processing for: {anime_folder_name}")
     
     local_cover_names = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
@@ -76,46 +76,50 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
     
     season_images_cache = {} 
     
-    for root, subfolders, files in os.walk(anime_folder_path):
-        for file in files:
-            if file.lower().endswith('.mp3'):
-                full_mp3_path = os.path.join(root, file)
-                music_title = os.path.splitext(file)[0]
-                
-                current_image_path = final_image_path
-                
-                season_match = re.search(r'Season\s+(\d+)', root, re.IGNORECASE)
-                
-                if season_match and series_id and jelly_url and jelly_api:
-                    season_num = int(season_match.group(1))
-                    
-                    if season_num in season_images_cache:
-                        current_image_path = season_images_cache[season_num] or final_image_path
-                    else:
-                        print(f"[AUTOMATION] 🔍 Looking for Season {season_num} specific cover on Jellyfin...")
-                        season_image_url = fetch_jellyfin_season_image(series_id, season_num, jelly_url, jelly_api)
-                        
-                        if season_image_url:
-                            temp_folder = tempfile.gettempdir()
-                            temp_file_name = f"temp_cover_{series_id}_S{season_num}.jpg"
-                            
-                            downloaded_season_path = download_jellyfin_image(
-                                image_url=season_image_url,
-                                api_key=jelly_api,
-                                dest_folder=temp_folder,
-                                file_name=temp_file_name
-                            )
-                            if downloaded_season_path:
-                                season_images_cache[season_num] = downloaded_season_path
-                                current_image_path = downloaded_season_path
-                            else:
-                                season_images_cache[season_num] = None
-                        else:
-                            print(f"[JELLYFIN] ⚠️ Cover for Season {season_num} not found. Using main cover fallback.")
-                            season_images_cache[season_num] = None
+    if only_file:
+        mp3_paths = [only_file]
+    else:
+        mp3_paths = [
+            os.path.join(root, file)
+            for root, _, files in os.walk(anime_folder_path)
+            for file in files if file.lower().endswith('.mp3')
+        ]
 
-                if inject_mp3_metadata(full_mp3_path, current_image_path, music_title, final_album_name, final_genre):
-                    mp3_found += 1
+    for full_mp3_path in mp3_paths:
+        root = os.path.dirname(full_mp3_path)
+        music_title = os.path.splitext(os.path.basename(full_mp3_path))[0]
+
+        current_image_path = final_image_path
+
+        season_match = re.search(r'Season\s+(\d+)', root, re.IGNORECASE)
+
+        if season_match and series_id and jelly_url and jelly_api:
+            season_num = int(season_match.group(1))
+
+            if season_num in season_images_cache:
+                current_image_path = season_images_cache[season_num] or final_image_path
+            else:
+                print(f"[AUTOMATION] 🔍 Looking for Season {season_num} specific cover on Jellyfin...")
+                season_image_url = fetch_jellyfin_season_image(series_id, season_num, jelly_url, jelly_api)
+
+                if season_image_url:
+                    downloaded_season_path = download_jellyfin_image(
+                        image_url=season_image_url,
+                        api_key=jelly_api,
+                        dest_folder=tempfile.gettempdir(),
+                        file_name=f"temp_cover_{series_id}_S{season_num}.jpg"
+                    )
+                    if downloaded_season_path:
+                        season_images_cache[season_num] = downloaded_season_path
+                        current_image_path = downloaded_season_path
+                    else:
+                        season_images_cache[season_num] = None
+                else:
+                    print(f"[JELLYFIN] ⚠️ Cover for Season {season_num} not found. Using main cover fallback.")
+                    season_images_cache[season_num] = None
+
+        if inject_mp3_metadata(full_mp3_path, current_image_path, music_title, final_album_name, final_genre):
+            mp3_found += 1
                     
     print(f"[AUTOMATION] ✨ Done! Metadata applied to {mp3_found} MP3 file(s).")
     
@@ -165,6 +169,21 @@ def _is_single_media_folder(base_path):
         if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
             return True
     return False
+
+def _is_season_folder_name(name):
+    name = name.lower()
+    return "season" in name or "temporada" in name or name == "specials"
+
+def _media_folder_of_track(file_path):
+    """Media folder that owns a theme track: <media>/theme.mp3, <media>/theme-music/x.mp3 or <media>/<season>/theme-music/x.mp3"""
+    parent = os.path.dirname(file_path)
+    if os.path.basename(parent).lower() != "theme-music":
+        return parent if os.path.basename(file_path).lower() == "theme.mp3" else None
+
+    owner = os.path.dirname(parent)
+    if _is_season_folder_name(os.path.basename(owner)):
+        return os.path.dirname(owner)
+    return owner
 
 def _library_root(base_path):
     return os.path.dirname(base_path) if _is_single_media_folder(base_path) else base_path
@@ -416,7 +435,7 @@ class Api:
                         affected_files += 1 
                             
                 if options.get("metadata", True):
-                    process_folder_artwork(anime_folder, anime_name, current_config)
+                    process_folder_artwork(anime_folder, anime_name, _artwork_config())
                 
             print("\n=======================================================")
             print(f"[ENHANCE] Complete! {affected_files} file(s) modified/read.")
@@ -589,12 +608,21 @@ class Api:
         return True
 
     def _execute_queue_thread(self, music_list, root_anime_folder):
+        try:
+            self._run_queue(music_list, root_anime_folder)
+        except Exception as e:
+            print(f"\n[ERROR] Queue stopped by an unexpected error: {e}\n")
+            global_state["statusText"] = f"Error: {str(e)}"
+        finally:
+            global_state["is_processing"] = False
+
+    def _run_queue(self, music_list, root_anime_folder):
         current_config = self.get_settings()
         audio_effects = current_config.get("audio_fx", {})
 
         total = len(music_list)
 
-        global_state["item_statuses"] = ["waiting"] * total 
+        global_state["item_statuses"] = ["waiting"] * total
         global_state["percentage"] = 0
         global_state["is_processing"] = True
         global_state["statusText"] = "Starting process..."
@@ -613,7 +641,7 @@ class Api:
             lufs = music['lufs']
 
             track_fx = music.get('audio_fx') or audio_effects
-            
+
             percentage = int((i / total) * 100)
             perc_text = f"{percentage}%" if i == 0 else f"{i}/{total} ({percentage}%)"
 
@@ -622,12 +650,12 @@ class Api:
             global_state["statusText"] = f"Downloading: {name}..."
             global_state["percentageText"] = perc_text
 
-            downloaded_file = None 
+            downloaded_file = None
             try:
                 downloaded_file = _download_with_retry(link, "[RETRY]", name)
 
                 global_state["statusText"] = f"Normalizing: {name}..."
-                
+
                 if "Season" in destination:
                     theme_type = "season"
                     temp_folder = destination
@@ -637,26 +665,23 @@ class Api:
                     temp_folder = None
 
                 final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-                
-                start_time = music.get('startTime', None)
-                end_time = music.get('endTime', None)
-                
+
                 normalize_and_save(
-                    downloaded_file, 
-                    final_path, 
-                    lufs, 
-                    track_fx, 
-                    start_time=start_time, 
-                    end_time=end_time
+                    downloaded_file,
+                    final_path,
+                    lufs,
+                    track_fx,
+                    start_time=music.get('startTime'),
+                    end_time=music.get('endTime')
                 )
-                
+
                 global_state["item_statuses"][i] = "completed"
                 print(f"[SUCCESS] {name} finished successfully!")
-                
+
             except Exception as e:
                 print(f"\n[ERROR] Failed to process {name}: {str(e)}\n")
                 global_state["item_statuses"][i] = "error"
-                
+
             finally:
                 # GUARANTEED CLEANUP
                 if downloaded_file and os.path.exists(downloaded_file):
@@ -673,15 +698,14 @@ class Api:
         global_state["percentage"] = 99
         global_state["statusText"] = "Applying Cover Arts..."
         global_state["percentageText"] = "99%"
-        
+
         process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
 
         # Process complete!
         global_state["percentage"] = 100
         global_state["statusText"] = "All operations completed!"
         global_state["percentageText"] = f"{total}/{total} (100%)"
-        global_state["is_processing"] = False 
-        
+
         print("\n[SYSTEM] Queue completed successfully! Waiting for new commands...")
 
 
@@ -875,11 +899,11 @@ class Api:
                 new_file_path = os.path.join(os.path.dirname(file_path), new_name)
                 print(f"[LIBRARY] Renaming physical file from '{file_path}' to '{new_file_path}'")
                 
-                # Evita colisões caso um arquivo com esse novo nome já exista
-                if os.path.exists(new_file_path):
-                    print(f"[LIBRARY] Target file already exists. Removing: '{new_file_path}'")
-                    os.remove(new_file_path)
-                    
+                # Never overwrite another track. A case-only rename points to the same file on Windows and is allowed
+                if os.path.exists(new_file_path) and not os.path.samefile(file_path, new_file_path):
+                    print(f"[LIBRARY] Rename aborted: '{new_name}' already exists in this folder.")
+                    return {"success": False, "message": f"A track named '{new_name}' already exists in this folder."}
+
                 os.rename(file_path, new_file_path)
                 file_path = new_file_path  # Mantém a referência atualizada para a injeção de tags
                 print(f"[LIBRARY] Rename completed successfully!")
@@ -887,41 +911,12 @@ class Api:
                 print(f"[LIBRARY] Rename skipped (name matches or empty new_name)")
             
             if tag_enabled:
-                parts = file_path.split(os.sep)
-                anime_folder_path = None
-                
-                if parts[-1].lower() == "theme.mp3":
-                    anime_folder_path = os.path.dirname(file_path)
-                elif len(parts) >= 2 and parts[-2].lower() == "theme-music":
-                    anime_folder_path = os.path.dirname(os.path.dirname(file_path))
-                    
-                if anime_folder_path:
-                    anime_name = os.path.basename(anime_folder_path)
-                    config = load_config()
-                    
-                    if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
-                        jf_data = fetch_jellyfin_data(anime_name, config["jelly_url"], config["jelly_api"])
-                        
-                        if jf_data and jf_data.get("id"):
-                            title = os.path.splitext(parts[-1])
-                            album = anime_name
-                            genre = "Anime"
-                            
-                            with tempfile.TemporaryDirectory() as temp_dir:
-                                img_url = f"{config['jelly_url'].rstrip('/')}/Items/{jf_data['id']}/Images/Primary?format=jpg"
-                                img_path = os.path.join(temp_dir, "cover.jpg")
-                                
-                                try:
-                                    headers = {"X-Emby-Token": config["jelly_api"]}
-                                    res = requests.get(img_url, headers=headers, timeout=5)
-                                    if res.status_code == 200:
-                                        with open(img_path, 'wb') as f:
-                                            f.write(res.content)
+                media_folder = _media_folder_of_track(file_path)
+                if media_folder:
+                    process_folder_artwork(media_folder, os.path.basename(media_folder), _artwork_config(), only_file=file_path)
+                else:
+                    print(f"[LIBRARY] Could not resolve the media folder of '{file_path}'. Skipping tags.")
 
-                                        inject_mp3_metadata(file_path, img_path, title, album, genre)
-                                except Exception as e:
-                                    print(f"[LIBRARY] Artwork injection error: {e}")
-                                    
             return {"success": True, "message": "Track processed!"}
             
         except Exception as e:
@@ -1049,7 +1044,7 @@ class Api:
                 dest_folder_path = os.path.join(real_dest_root, folder)
                 
                 if folder in missing_folders:
-                    if decision == "skip":
+                    if decision in ("skip", "skip_missing"):
                         continue
                     elif decision == "create_all":
                         os.makedirs(dest_folder_path, exist_ok=True)
@@ -1162,7 +1157,7 @@ class Api:
             print(f"[ASSISTANT] Error getting suggestions for {folder_name}: {e}")
             return {"success": False, "message": str(e)}
 
-    def process_assistant_downloads(self, download_list, base_folder):
+    def process_assistant_downloads(self, download_list, base_folder, options=None):
         if global_state.get("is_processing", False):
             return {"success": False, "message": "Themarr is currently processing another task. Please wait."}
             
@@ -1171,13 +1166,15 @@ class Api:
         global_state["statusText"] = "Starting Assistant Downloads..."
         global_state["percentageText"] = "0%"
         
-        _start_background(self._execute_assistant_download_thread, download_list, base_folder)
+        _start_background(self._execute_assistant_download_thread, download_list, base_folder, options or {})
         return {"success": True, "message": "Assistant download started!"}
 
-    def _execute_assistant_download_thread(self, download_list, base_folder):
+    def _execute_assistant_download_thread(self, download_list, base_folder, options):
         try:
             current_config = self.get_settings()
-            audio_effects = current_config.get("audio_fx", {})
+            normalize_enabled = options.get("normalize", True)
+            audio_effects = current_config.get("audio_fx", {}) if options.get("fades", True) else {}
+            tags_enabled = options.get("tags", True)
             target_lufs = float(current_config.get("lufs", -24))
             
             total = len(download_list)
@@ -1212,10 +1209,12 @@ class Api:
                         downloaded_file,
                         final_path,
                         target_lufs,
-                        audio_effects
+                        audio_effects,
+                        normalize_enabled=normalize_enabled
                     )
-                    
-                    process_folder_artwork(folder_path, folder_name, current_config)
+
+                    if tags_enabled:
+                        process_folder_artwork(folder_path, folder_name, _artwork_config())
                     print(f"[ASSISTANT SUCCESS] Successfully applied theme for: {folder_name}")
                     
                 except Exception as e:

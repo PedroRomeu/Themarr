@@ -32,6 +32,11 @@ def register_routes(app, api_system):
         api_system.process_queue(queue_data, folder)
         return jsonify({"status": "success"})
 
+    @app.route('/api/get_subfolders', methods=['POST'])
+    def api_flask_get_subfolders():
+        data = request.get_json(force=True, silent=True) or {}
+        return jsonify(api_system.get_subfolders(data.get('folder', '')))
+
     @app.route('/api/status', methods=['GET'])
     def api_flask_status():
         return jsonify(api_system.get_status())
@@ -57,11 +62,12 @@ def register_routes(app, api_system):
         try:
             data = request.get_json(force=True, silent=True) or {}
             folder = data.get('folder', '')
-            batch_mode = data.get('batchMode', False)
-            
-            print(f"\n[RECEIVED FROM BROWSER] Delete files in: {folder} | Batch: {batch_mode}")
-            
-            result = api_system.delete_music_folder(folder, batch_mode)
+            scope = data.get('scope', 'single')
+            selected_folders = data.get('selectedFolders', [])
+
+            print(f"\n[RECEIVED FROM BROWSER] Delete files in: {folder} | Scope: {scope}")
+
+            result = api_system.delete_music_folder(folder, scope, selected_folders)
             return jsonify(result)
             
         except Exception as e:
@@ -74,13 +80,14 @@ def register_routes(app, api_system):
             data = request.get_json(force=True, silent=True) or {}
             
             folder = data.get('folder', '')
-            batch_mode = data.get('batchMode', False)
+            scope = data.get('scope', 'single')
             lufs = data.get('lufs', '-24')
             options = data.get('options', None)
-            
-            print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {folder} | Batch: {batch_mode} | LUFS: {lufs} | Options: {options}")
-            
-            result = api_system.enhance_local_music(folder, batch_mode, lufs, options)
+            selected_folders = data.get('selectedFolders', [])
+
+            print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {folder} | Scope: {scope} | LUFS: {lufs} | Options: {options}")
+
+            result = api_system.enhance_local_music(folder, scope, lufs, options, selected_folders)
             return jsonify(result)
             
         except Exception as e:
@@ -280,7 +287,8 @@ def register_routes(app, api_system):
             data = request.json or {}
             download_list = data.get('download_list', [])
             base_folder = data.get('base_folder', '')
-            result = api_system.process_assistant_downloads(download_list, base_folder)
+            options = data.get('options', {})
+            result = api_system.process_assistant_downloads(download_list, base_folder, options)
             return jsonify(result)
         except Exception as e:
             print(f"[FLASK ERROR] Assistant download failed: {e}")
