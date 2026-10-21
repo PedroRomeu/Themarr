@@ -1350,15 +1350,15 @@ function renderLibrary(openMediaNames = []) {
         
         animeCard.innerHTML = `
             <div class="flex items-center justify-between px-4 py-3.5 cursor-pointer select-none" onclick="toggleLibraryAccordion(${animeIdx})">
-                <div class="flex items-center gap-3">
-                    <span id="lib-chevron-${animeIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
-                    <span class="font-semibold text-neutral-200 text-sm tracking-wide">${anime.anime_name}</span>
-                    <span class="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-medium">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                    <span id="lib-chevron-${animeIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200 flex-shrink-0" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
+                    <span class="font-semibold text-neutral-200 text-sm tracking-wide truncate" title="${anime.anime_name}">${anime.anime_name}</span>
+                    <span class="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap">
                         ${trackCount} ${trackCount === 1 ? 'track' : 'tracks'}
                     </span>
                 </div>
-                
-                <div class="flex items-center gap-2" onclick="event.stopPropagation()">
+
+                <div class="flex items-center gap-2 flex-shrink-0 ml-3" onclick="event.stopPropagation()">
                     ${hasTracks ? `
                     <button onclick="applyAllTracksInMedia(${animeIdx})" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors">
                         ⚡ Apply All
