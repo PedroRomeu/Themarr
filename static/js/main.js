@@ -90,13 +90,8 @@ async function loadAppInfo() {
     }
     if (!SERVER_MODE) return;
 
-    // Features that move episode files are unavailable on the server
-    ['enhanceOrganizeOption', 'libBulkOrganizeBtn', 'openBrowserOption'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.add('hidden');
-    });
-    const organizeCheck = document.getElementById('chkOrganize');
-    if (organizeCheck) organizeCheck.checked = false;
+    // Opening a local browser window makes no sense on a headless server
+    document.getElementById('openBrowserOption').classList.add('hidden');
 
     document.getElementById('serverUserName').innerText = info.user || '';
     document.getElementById('serverSessionBar').classList.remove('hidden');
@@ -500,11 +495,8 @@ function applySelectedFolder(response) {
 
     let returnedSeasons = response.seasons || [];
     if(returnedSeasons.length === 0) {
-        // On the server a missing season folder is never created, so only Main Theme is offered
-        if (!SERVER_MODE) {
-            let folderName = returnedPath.split('\\').pop().split('/').pop();
-            globalDestinationOptions.push(`Season 01. ${folderName}`);
-        }
+        let folderName = returnedPath.split('\\').pop().split('/').pop();
+        globalDestinationOptions.push(`Season 01. ${folderName}`);
     } else {
         globalDestinationOptions.push(...returnedSeasons);
     }
@@ -1478,7 +1470,7 @@ function renderLibrary(openMediaNames = []) {
                         ⚡ Apply All
                     </button>
                     ` : ''}
-                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="${SERVER_MODE ? 'hidden ' : ''}px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
+                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
                         📂 Organize Folder
                     </button>
                 </div>

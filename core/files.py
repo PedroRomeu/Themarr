@@ -2,8 +2,7 @@ import os
 import re
 import shutil
 
-from core.config import SERVER_MODE
-from core.safety import check_theme_write
+from core.safety import check_theme_write, check_media_read
 
 def clean_search_name(folder_name, remove_year=False):
     if folder_name.lower().endswith('.mp3'):
@@ -21,6 +20,16 @@ def clean_search_name(folder_name, remove_year=False):
     
     clean_name = re.sub(r'\s+', ' ', clean_name)
     return clean_name.strip()
+
+def safe_move(src, dst):
+    """Moves a file or folder without ever replacing something that already exists. Returns False when skipped"""
+    if os.path.exists(dst):
+        print(f"[ORGANIZE] ⚠️ Kept '{os.path.basename(src)}' where it is: '{dst}' already exists.")
+        return False
+    check_media_read(src)
+    check_media_read(dst)
+    shutil.move(src, dst)
+    return True
 
 def generate_destination_path(anime_folder, theme_type, custom_name, season_folder=None, multiple_main=False):
     if not custom_name.endswith('.mp3'):
@@ -60,10 +69,6 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
     return final_file
 
 def move_loose_episodes(root_folder, season_folder):
-    if SERVER_MODE:
-        print("[CLEANUP] Smart Organize skipped on the server: episode files are never moved.")
-        return
-
     media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
     temp_path = os.path.join(root_folder, season_folder)
     os.makedirs(temp_path, exist_ok=True)
@@ -73,8 +78,8 @@ def move_loose_episodes(root_folder, season_folder):
         item_path = os.path.join(root_folder, item)
         if os.path.isfile(item_path) and item.lower().endswith(media_extensions):
             new_path = os.path.join(temp_path, item)
-            shutil.move(item_path, new_path)
-            moved_files += 1
+            if safe_move(item_path, new_path):
+                moved_files += 1
             
     if moved_files > 0:
         print(f"\n[CLEANUP] Smart Organize: {moved_files} media file(s) moved!")

@@ -19,7 +19,7 @@ from core.safety import check_theme_write, check_media_read, is_theme_file, them
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
 from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item
-from core.files import generate_destination_path, move_loose_episodes, clean_search_name
+from core.files import generate_destination_path, move_loose_episodes, clean_search_name, safe_move
 
 global_state = {
     "is_processing": False,
@@ -375,9 +375,6 @@ class Api:
                 return anime_folder
 
     def _auto_organize_single_season(self, anime_folder):
-        if SERVER_MODE:
-            print(f"[AUTO-ORGANIZE] Skipped on the server for '{os.path.basename(anime_folder)}': episode files are never moved.")
-            return
         try:
             items_in_folder = os.listdir(anime_folder)
             
@@ -397,8 +394,8 @@ class Api:
                     
                     if os.path.isfile(item_path) and item.lower().endswith(media_extensions):
                         os.makedirs(new_season_path, exist_ok=True)
-                        shutil.move(item_path, os.path.join(new_season_path, item))
-                        moved_items += 1
+                        if safe_move(item_path, os.path.join(new_season_path, item)):
+                            moved_items += 1
                         
                 if moved_items > 0:
                     print(f"\n[AUTO-ORGANIZE] 🧹 {moved_items} item(s) automatically organized into '{new_season_name}'!")
@@ -420,8 +417,8 @@ class Api:
                 
                 for s_item in season_items:
                     if s_item.lower() == "theme-music" and os.path.isdir(os.path.join(only_season_path, s_item)):
-                        shutil.move(os.path.join(only_season_path, s_item), os.path.join(anime_folder, s_item))
-                        print(f"\n[AUTO-ORGANIZE] 🎵 Promoted 'theme-music' from '{season_folders[0]}' to Main Anime Folder!")
+                        if safe_move(os.path.join(only_season_path, s_item), os.path.join(anime_folder, s_item)):
+                            print(f"\n[AUTO-ORGANIZE] 🎵 Promoted 'theme-music' from '{season_folders[0]}' to Main Anime Folder!")
                         break
                         
         except Exception as e:

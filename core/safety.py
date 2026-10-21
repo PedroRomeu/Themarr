@@ -1,9 +1,10 @@
 """Media safety guard for server mode.
 
-On the server the media folders belong to Jellyfin, and moving or deleting anything there can make
-Jellyfin re-identify items and lose their customizations. In server mode Themarr may only touch
-theme files: <media>/theme.mp3 and <media>/[<season>/]theme-music/*.mp3, inside MEDIA_ROOT, and it
-may only create the theme-music folder itself, never a media or season folder.
+On the server the media folders belong to Jellyfin and nothing there may ever be lost. In server mode
+Themarr may only write, rename or delete theme files: <media>/theme.mp3 and
+<media>/[<season>/]theme-music/*.mp3, inside MEDIA_ROOT. It never creates a media folder; a season
+folder may be created inside an existing media folder (queue and Organize do that, like on desktop).
+Organize moves episodes through core.files.safe_move, which never replaces an existing file.
 
 Desktop mode keeps the original behavior: every check here is a no-op unless SERVER_MODE is on.
 """
@@ -32,6 +33,11 @@ def is_theme_file(path):
     return name.endswith('.mp3') and (name == 'theme.mp3' or parent == 'theme-music')
 
 
+def is_season_folder_name(name):
+    name = name.lower()
+    return "season" in name or "temporada" in name or name == "specials"
+
+
 def theme_owner_folder(path):
     """Media or season folder that holds a theme file (must already exist on disk)"""
     parent = os.path.dirname(path)
@@ -49,19 +55,19 @@ def check_theme_write(path, action="write"):
     owner = theme_owner_folder(path)
     # <MEDIA_ROOT>/<library>/<media>[/<season>]: never the root or a library folder such as /data/Animes
     depth = len(os.path.relpath(os.path.realpath(owner), MEDIA_ROOT).split(os.sep))
-    if depth < 2 or not os.path.isdir(owner):
-        raise UnsafeMediaOperation(f"Blocked {action}: '{owner}' is not an existing media or season folder")
+    if depth < 2:
+        raise UnsafeMediaOperation(f"Blocked {action}: '{owner}' is not a media or season folder")
+    if not os.path.isdir(owner):
+        # A missing season folder may be created, but only inside an existing media folder
+        new_season = depth == 3 and is_season_folder_name(os.path.basename(owner)) and os.path.isdir(os.path.dirname(owner))
+        if not new_season:
+            raise UnsafeMediaOperation(f"Blocked {action}: '{owner}' is not an existing media or season folder")
 
 
 def check_media_read(path):
     """Server mode only reads inside the media folder"""
     if SERVER_MODE and not is_within_media_root(path):
         raise UnsafeMediaOperation(f"Blocked access outside the media folder: {path}")
-
-
-def block_in_server_mode(action):
-    if SERVER_MODE:
-        raise UnsafeMediaOperation(f"'{action}' is disabled on the server: it would move media files Jellyfin depends on.")
 
 
 def theme_files_only(paths):
