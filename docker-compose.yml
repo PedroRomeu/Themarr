@@ -6,6 +6,11 @@ services:
     restart: unless-stopped
     # Same owner as the media files, so themes are never created as root
     user: "1000:1000"
+    # Low priority under contention (default is 1024): Jellyfin and the others get about 4x more CPU.
+    # Idle cores are still fully available to Themarr.
+    cpu_shares: 256
+    # If processing ever needs more, the kernel stops Themarr instead of Jellyfin
+    mem_limit: 600m
     environment:
       - TZ=America/Sao_Paulo
       - JELLYFIN_URL=http://jellyfin:8096
