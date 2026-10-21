@@ -1,9 +1,7 @@
 import os
-import queue
-from flask import render_template, jsonify, request
+from flask import render_template, jsonify, request, send_file
 
-from core.logger import log_queue
-from api_controller import global_state
+from core.config import load_config
 
 def register_routes(app, api_system):
 
@@ -29,8 +27,8 @@ def register_routes(app, api_system):
     @app.route('/api/process_queue', methods=['POST'])
     def api_flask_process_queue():
         data = request.json
-        queue_data = data.get('queue', data.get('fila', []))
-        folder = data.get('folder', data.get('pasta', ''))
+        queue_data = data.get('queue', [])
+        folder = data.get('folder', '')
         api_system.process_queue(queue_data, folder)
         return jsonify({"status": "success"})
 
@@ -46,7 +44,7 @@ def register_routes(app, api_system):
             url = data.get('url', '')
             api_key = data.get('api_key', data.get('api', '')) 
             
-            print(f"\n[RECEIVED FROM BROWSER] URL: {url} | API: {api_key}")
+            print(f"\n[RECEIVED FROM BROWSER] URL: {url} | API: {'*' * 8 if api_key else '(empty)'}")
             
             result = api_system.test_jellyfin(url, api_key)
             return jsonify(result)
@@ -58,8 +56,8 @@ def register_routes(app, api_system):
     def api_flask_delete_music():
         try:
             data = request.get_json(force=True, silent=True) or {}
-            folder = data.get('folder', data.get('pasta', ''))
-            batch_mode = data.get('batchMode', data.get('modoBatch', False))
+            folder = data.get('folder', '')
+            batch_mode = data.get('batchMode', False)
             
             print(f"\n[RECEIVED FROM BROWSER] Delete files in: {folder} | Batch: {batch_mode}")
             
@@ -75,10 +73,10 @@ def register_routes(app, api_system):
         try:
             data = request.get_json(force=True, silent=True) or {}
             
-            folder = data.get('folder', data.get('pasta', ''))
-            batch_mode = data.get('batchMode', data.get('modoBatch', False))
+            folder = data.get('folder', '')
+            batch_mode = data.get('batchMode', False)
             lufs = data.get('lufs', '-24')
-            options = data.get('options', data.get('opcoes', None))
+            options = data.get('options', None)
             
             print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {folder} | Batch: {batch_mode} | LUFS: {lufs} | Options: {options}")
             
@@ -140,8 +138,7 @@ def register_routes(app, api_system):
         file_path = request.args.get('path')
         if not file_path or not os.path.exists(file_path):
             return "File not found", 404
-            
-        from flask import send_file
+
         return send_file(file_path, mimetype="audio/mpeg")
 
     @app.route('/api/library/process', methods=['POST'])
@@ -154,8 +151,7 @@ def register_routes(app, api_system):
         tag = data.get('tag', True)
         start_time = data.get('startTime', '')
         end_time = data.get('endTime', '')
-        
-        from core.config import load_config
+
         config = load_config()
         target_lufs = float(config.get('lufs', -24))
         

@@ -8,10 +8,11 @@ import requests
 import subprocess
 import zipfile
 from datetime import datetime
+from mutagen.mp3 import MP3
 
 from core.config import load_config, save_config, APP_ROOT_DIR
 from core.logger import log_queue
-from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata
+from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
 from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name
 
@@ -131,6 +132,76 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config):
             except Exception:
                 pass
 
+def _start_background(target, *args):
+    t = threading.Thread(target=target, args=args)
+    t.daemon = True
+    t.start()
+
+def _download_with_retry(link, log_prefix, name):
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        try:
+            return download_music(link)
+        except Exception:
+            if attempt == max_attempts - 1:
+                raise
+            print(f"{log_prefix} ⚠️ Attempt {attempt + 1} failed to download '{name}'. Retrying...")
+
+def _artwork_config():
+    """Config for process_folder_artwork: Jellyfin credentials blanked when the integration is disabled"""
+    config = load_config()
+    if not config.get("jelly_check"):
+        config["jelly_url"] = ""
+        config["jelly_api"] = ""
+    return config
+
+def _is_single_media_folder(base_path):
+    """True when base_path is one media folder (has theme files or season folders) instead of the library root"""
+    if os.path.exists(os.path.join(base_path, "theme.mp3")):
+        return True
+    if os.path.isdir(os.path.join(base_path, "theme-music")):
+        return True
+    for item in os.listdir(base_path):
+        if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
+            return True
+    return False
+
+def _library_root(base_path):
+    return os.path.dirname(base_path) if _is_single_media_folder(base_path) else base_path
+
+def _track_entry(file_path, file_name, location_type, error_label):
+    duration = 0.0
+    try:
+        duration = MP3(file_path).info.length
+    except Exception as e:
+        print(f"[LIBRARY] Error reading {error_label}: {e}")
+
+    return {
+        "file_name": file_name,
+        "file_path": file_path,
+        "location_type": location_type,
+        "duration": duration,
+        "startTime": "0",
+        "endTime": f"{int(duration)}" if duration > 0 else "0"
+    }
+
+def _theme_folder_tracks(theme_folder, location_type, error_label):
+    tracks = []
+    if os.path.isdir(theme_folder):
+        for file in os.listdir(theme_folder):
+            if file.lower().endswith('.mp3'):
+                tracks.append(_track_entry(os.path.join(theme_folder, file), file, location_type, f"{error_label} {file}"))
+    return tracks
+
+def _powershell_dialog(script):
+    res = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
+    return res.stdout.strip()
+
 class Api:
     def select_folder(self):
         folder = ""
@@ -149,13 +220,7 @@ class Api:
                     "$dialog.ShowNewFolderButton = $true;"
                     "if($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath }"
                 )
-                res = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", cmd],
-                    capture_output=True,
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                folder = res.stdout.strip()
+                folder = _powershell_dialog(cmd)
 
             if folder and os.path.exists(folder):
                 for item in os.listdir(folder):
@@ -276,20 +341,16 @@ class Api:
         if is_batch:
             target_folder = self._resolve_smart_folders(target_folder, is_batch)
             
-        global global_state
         global_state["is_processing"] = True
         global_state["percentage"] = 0
         global_state["statusText"] = "Starting Enhancement..."
         global_state["percentageText"] = "0%"
 
-        t = threading.Thread(target=self._execute_enhance_thread, args=(target_folder, scope, target_lufs, options, selected_folders))
-        t.daemon = True
-        t.start()
+        _start_background(self._execute_enhance_thread, target_folder, scope, target_lufs, options, selected_folders)
         
         return {"status": "success", "message": "Enhancement started in background!"}
 
     def _execute_enhance_thread(self, target_folder, scope, target_lufs, options, selected_folders):
-        global global_state
         try:
             print("\n=======================================================")
             print("[ENHANCE] Starting audio enhancement process...")
@@ -332,12 +393,11 @@ class Api:
                 if not options.get("normalize", True) and not options.get("metadata", True) and not options.get("audio_fx", False):
                     continue
 
-                mp3s_in_folder = []
-                for root, _, files in os.walk(anime_folder):
-                    for file in files:
-                        if file.lower().endswith('.mp3'):
-                            mp3_path = os.path.join(root, file)
-                            mp3s_in_folder.append(mp3_path)
+                mp3s_in_folder = [
+                    os.path.join(root, file)
+                    for root, _, files in os.walk(anime_folder)
+                    for file in files if file.lower().endswith('.mp3')
+                ]
                 
                 if not mp3s_in_folder:
                     continue 
@@ -432,13 +492,12 @@ class Api:
             return {"status": "error", "message": f"Error during cleanup: {str(e)}"}
 
     def get_status(self):
-        global global_state
-        logs = ""
+        chunks = []
         while not log_queue.empty():
-            logs += log_queue.get()
-                
+            chunks.append(log_queue.get())
+
         return {
-            "logs": logs,
+            "logs": "".join(chunks),
             "is_processing": global_state["is_processing"],
             "percentage": global_state["percentage"],
             "statusText": global_state["statusText"],
@@ -447,25 +506,20 @@ class Api:
         }
     
     def retry_single_item(self, index, music, root_anime_folder):
-        global global_state
         global_state["is_processing"] = True
         global_state["item_statuses"][index] = "processing"
-        global_state["statusText"] = f"Retrying: {music.get('name', music.get('nome'))}..."
+        global_state["statusText"] = f"Retrying: {music.get('name')}..."
         
-        t = threading.Thread(target=self._execute_single_retry_thread, args=(index, music, root_anime_folder))
-        t.daemon = True
-        t.start()
+        _start_background(self._execute_single_retry_thread, index, music, root_anime_folder)
         return True
 
     def _execute_single_retry_thread(self, index, music, root_anime_folder):
-        global global_state
-
         current_config = self.get_settings()
         audio_effects = current_config.get("audio_fx", {})
         
         link = music['link']
-        name = music.get('name', music.get('nome'))
-        destination = music.get('destination', music.get('destino'))
+        name = music.get('name')
+        destination = music.get('destination')
         lufs = music['lufs']
         has_multi_main = music.get('has_multi_main', False)
 
@@ -475,16 +529,8 @@ class Api:
         
         downloaded_file = None
         try:
-            max_attempts = 2
-            for attempt in range(max_attempts):
-                try:
-                    downloaded_file = download_music(link)
-                    break
-                except Exception as dl_error:
-                    if attempt == max_attempts - 1:
-                        raise dl_error
-                    print(f"[RETRY] ⚠️ Attempt {attempt + 1} failed for '{name}'. Retrying...")
-                    
+            downloaded_file = _download_with_retry(link, "[RETRY]", name)
+
             global_state["statusText"] = f"Normalizing: {name}..."
             
             if "Season" in destination:
@@ -511,12 +557,7 @@ class Api:
             if "Season" in destination:
                 move_loose_episodes(root_anime_folder, destination)
                 
-            current_config = load_config()
-            anime_name = os.path.basename(root_anime_folder)
-            if not current_config.get("jelly_check"):
-                current_config["jelly_url"] = ""
-                current_config["jelly_api"] = ""
-            process_folder_artwork(root_anime_folder, anime_name, current_config)
+            process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
             
             global_state["item_statuses"][index] = "completed"
             global_state["statusText"] = "Item processed successfully!"
@@ -538,21 +579,16 @@ class Api:
                 global_state["is_processing"] = False
 
     def process_queue(self, music_list, root_anime_folder):
-        global global_state
         global_state["is_processing"] = True
         global_state["percentage"] = 0
         global_state["statusText"] = "Starting..."
         global_state["percentageText"] = "0%"
         global_state["item_statuses"] = ["waiting"] * len(music_list)
 
-        t = threading.Thread(target=self._execute_queue_thread, args=(music_list, root_anime_folder))
-        t.daemon = True
-        t.start()
+        _start_background(self._execute_queue_thread, music_list, root_anime_folder)
         return True
 
     def _execute_queue_thread(self, music_list, root_anime_folder):
-        global global_state
-
         current_config = self.get_settings()
         audio_effects = current_config.get("audio_fx", {})
 
@@ -566,14 +602,14 @@ class Api:
 
         print(f"\n[SYSTEM] Starting queue with {total} items...\n")
 
-        main_count = sum(1 for m in music_list if m.get('destination', m.get('destino')) == 'Main Theme')
+        main_count = sum(1 for m in music_list if m.get('destination') == 'Main Theme')
         has_multi_main = main_count > 1
         seasons_to_clean = set()
 
         for i, music in enumerate(music_list):
             link = music['link']
-            name = music.get('name', music.get('nome'))
-            destination = music.get('destination', music.get('destino'))
+            name = music.get('name')
+            destination = music.get('destination')
             lufs = music['lufs']
 
             track_fx = music.get('audio_fx') or audio_effects
@@ -588,16 +624,8 @@ class Api:
 
             downloaded_file = None 
             try:
-                max_attempts = 2
-                for attempt in range(max_attempts):
-                    try:
-                        downloaded_file = download_music(link)
-                        break
-                    except Exception as dl_error:
-                        if attempt == max_attempts - 1:
-                            raise dl_error
-                        print(f"[RETRY] ⚠️ Attempt {attempt + 1} failed to download '{name}'. Retrying automatically...")
-                
+                downloaded_file = _download_with_retry(link, "[RETRY]", name)
+
                 global_state["statusText"] = f"Normalizing: {name}..."
                 
                 if "Season" in destination:
@@ -646,14 +674,7 @@ class Api:
         global_state["statusText"] = "Applying Cover Arts..."
         global_state["percentageText"] = "99%"
         
-        current_config = load_config()
-        anime_name = os.path.basename(root_anime_folder)
-        
-        if not current_config.get("jelly_check"):
-            current_config["jelly_url"] = ""
-            current_config["jelly_api"] = ""
-
-        process_folder_artwork(root_anime_folder, anime_name, current_config)
+        process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
 
         # Process complete!
         global_state["percentage"] = 100
@@ -699,7 +720,6 @@ class Api:
         return True
 
     def get_subfolders(self, folder_path):
-        import os
         try:
             if not folder_path or not os.path.exists(folder_path):
                 return {"status": "error", "folders": [], "selected_anime": ""}
@@ -772,7 +792,6 @@ class Api:
         """Return the direct streaming URL for a given YouTube link."""
         if not url:
             return {"success": False, "error": "No URL provided"}
-        from core.audio import get_streaming_url
         return get_streaming_url(url)
 
     def list_local_library(self, base_path, scope="all", selected_folders=None):
@@ -786,20 +805,11 @@ class Api:
         if selected_folders is None:
             selected_folders = []
             
-        is_single_anime = False
-        if os.path.exists(os.path.join(base_path, "theme.mp3")):
-            is_single_anime = True
-        elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
-            is_single_anime = True
-        else:
-            try:
-                for item in os.listdir(base_path):
-                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
-                        is_single_anime = True
-                        break
-            except Exception:
-                pass
-                
+        try:
+            is_single_anime = _is_single_media_folder(base_path)
+        except Exception:
+            is_single_anime = False
+
         if is_single_anime:
             real_root_path = os.path.dirname(base_path)
             if not selected_folders:
@@ -822,73 +832,18 @@ class Api:
                 
                 single_theme_path = os.path.join(anime_path, "theme.mp3")
                 if os.path.exists(single_theme_path):
-                    duration = 0.0
-                    try:
-                        from mutagen.mp3 import MP3
-                        audio = MP3(single_theme_path)
-                        duration = audio.info.length
-                    except Exception as e:
-                        print(f"[LIBRARY] Error reading theme.mp3 in {folder}: {e}")
-                        
-                    tracks.append({
-                        "file_name": "theme.mp3",
-                        "file_path": single_theme_path,
-                        "location_type": "Main Theme (Single)",
-                        "duration": duration,
-                        "startTime": "0",
-                        "endTime": f"{int(duration)}" if duration > 0 else "0"
-                    })
-                
-                root_theme_folder = os.path.join(anime_path, "theme-music")
-                if os.path.exists(root_theme_folder) and os.path.isdir(root_theme_folder):
-                    for file in os.listdir(root_theme_folder):
-                        if file.lower().endswith('.mp3'):
-                            file_path = os.path.join(root_theme_folder, file)
-                            duration = 0.0
-                            try:
-                                from mutagen.mp3 import MP3
-                                audio = MP3(file_path)
-                                duration = audio.info.length
-                            except Exception as e:
-                                print(f"[LIBRARY] Error reading root theme-music {file}: {e}")
-                                
-                            tracks.append({
-                                "file_name": file,
-                                "file_path": file_path,
-                                "location_type": "Main Theme (Folder)",
-                                "duration": duration,
-                                "startTime": "0",
-                                "endTime": f"{int(duration)}" if duration > 0 else "0"
-                            })
-                            
+                    tracks.append(_track_entry(single_theme_path, "theme.mp3", "Main Theme (Single)", f"theme.mp3 in {folder}"))
+
+                tracks += _theme_folder_tracks(os.path.join(anime_path, "theme-music"), "Main Theme (Folder)", "root theme-music")
+
                 try:
                     for subitem in os.listdir(anime_path):
                         subitem_path = os.path.join(anime_path, subitem)
                         if os.path.isdir(subitem_path):
-                            season_theme_folder = os.path.join(subitem_path, "theme-music")
-                            if os.path.exists(season_theme_folder) and os.path.isdir(season_theme_folder):
-                                for file in os.listdir(season_theme_folder):
-                                    if file.lower().endswith('.mp3'):
-                                        file_path = os.path.join(season_theme_folder, file)
-                                        duration = 0.0
-                                        try:
-                                            from mutagen.mp3 import MP3
-                                            audio = MP3(file_path)
-                                            duration = audio.info.length
-                                        except Exception as e:
-                                            print(f"[LIBRARY] Error reading season track {file}: {e}")
-                                            
-                                        tracks.append({
-                                            "file_name": file,
-                                            "file_path": file_path,
-                                            "location_type": f"{subitem}",
-                                            "duration": duration,
-                                            "startTime": "0",
-                                            "endTime": f"{int(duration)}" if duration > 0 else "0"
-                                        })
+                            tracks += _theme_folder_tracks(os.path.join(subitem_path, "theme-music"), subitem, "season track")
                 except Exception as e:
                     print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
-                
+
                 library_data.append({
                     "anime_name": folder,
                     "folder_path": anime_path,
@@ -910,7 +865,6 @@ class Api:
             return {"success": False, "message": "Target file not found."}
             
         try:
-            from core.audio import normalize_audio_ffmpeg
             normalize_audio_ffmpeg(file_path, target_lufs, audio_effects, normalize_enabled)
             
             # Executa a renomeação física do arquivo apenas se o nome mudou
@@ -946,7 +900,6 @@ class Api:
                     config = load_config()
                     
                     if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
-                        from core.jellyfin import fetch_jellyfin_data
                         jf_data = fetch_jellyfin_data(anime_name, config["jelly_url"], config["jelly_api"])
                         
                         if jf_data and jf_data.get("id"):
@@ -964,8 +917,7 @@ class Api:
                                     if res.status_code == 200:
                                         with open(img_path, 'wb') as f:
                                             f.write(res.content)
-                                        
-                                        from core.audio import inject_mp3_metadata
+
                                         inject_mp3_metadata(file_path, img_path, title, album, genre)
                                 except Exception as e:
                                     print(f"[LIBRARY] Artwork injection error: {e}")
@@ -991,18 +943,7 @@ class Api:
             
             library_data = library_res["library"]
             
-            is_single = False
-            if os.path.exists(os.path.join(base_path, "theme.mp3")):
-                is_single = True
-            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
-                is_single = True
-            else:
-                for item in os.listdir(base_path):
-                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
-                        is_single = True
-                        break
-            
-            real_root = os.path.dirname(base_path) if is_single else base_path
+            real_root = _library_root(base_path)
             
             written_files = 0
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -1047,11 +988,7 @@ class Api:
                     " $dialog.Title = 'Select Themarr Backup File';"
                     " if($dialog.ShowDialog() -eq 'OK') { $dialog.FileName }"
                 )
-                res = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", cmd],
-                    capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                file_path = res.stdout.strip()
+                file_path = _powershell_dialog(cmd)
         except Exception as e:
             print(f"[BACKUP] Erro ao selecionar arquivo: {e}")
         return {"success": bool(file_path), "file_path": file_path}
@@ -1068,18 +1005,7 @@ class Api:
             with zipfile.ZipFile(zip_path, 'r') as zipf:
                 zipf.extractall(temp_dir)
                 
-            is_single = False
-            if os.path.exists(os.path.join(base_path, "theme.mp3")):
-                is_single = True
-            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
-                is_single = True
-            else:
-                for item in os.listdir(base_path):
-                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
-                        is_single = True
-                        break
-            
-            real_dest_root = os.path.dirname(base_path) if is_single else base_path
+            real_dest_root = _library_root(base_path)
             
             backup_media_folders = []
             for item in os.listdir(temp_dir):
@@ -1107,18 +1033,7 @@ class Api:
             return {"success": False, "message": "Sessão de importação expirou ou é inválida."}
             
         try:
-            is_single = False
-            if os.path.exists(os.path.join(base_path, "theme.mp3")):
-                is_single = True
-            elif os.path.exists(os.path.join(base_path, "theme-music")) and os.path.isdir(os.path.join(base_path, "theme-music")):
-                is_single = True
-            else:
-                for item in os.listdir(base_path):
-                    if os.path.isdir(os.path.join(base_path, item)) and (item.lower().startswith("season") or item.lower() == "specials"):
-                        is_single = True
-                        break
-            
-            real_dest_root = os.path.dirname(base_path) if is_single else base_path
+            real_dest_root = _library_root(base_path)
             
             imported_count = 0
             
@@ -1198,7 +1113,6 @@ class Api:
             clean_fallback = clean_search_name(folder_name, remove_year=True)
             
             if jelly_url and jelly_api and config.get("jelly_check"):
-                from core.jellyfin import fetch_jellyfin_data
                 search_result = fetch_jellyfin_data(folder_name, jelly_url, jelly_api)
                 if search_result.get("success"):
                     official_name = search_result.get("official_name")
@@ -1249,7 +1163,6 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def process_assistant_downloads(self, download_list, base_folder):
-        global global_state
         if global_state.get("is_processing", False):
             return {"success": False, "message": "Themarr is currently processing another task. Please wait."}
             
@@ -1258,13 +1171,10 @@ class Api:
         global_state["statusText"] = "Starting Assistant Downloads..."
         global_state["percentageText"] = "0%"
         
-        t = threading.Thread(target=self._execute_assistant_download_thread, args=(download_list, base_folder))
-        t.daemon = True
-        t.start()
+        _start_background(self._execute_assistant_download_thread, download_list, base_folder)
         return {"success": True, "message": "Assistant download started!"}
 
     def _execute_assistant_download_thread(self, download_list, base_folder):
-        global global_state
         try:
             current_config = self.get_settings()
             audio_effects = current_config.get("audio_fx", {})
@@ -1286,16 +1196,8 @@ class Api:
                 
                 downloaded_file = None
                 try:
-                    max_attempts = 2
-                    for attempt in range(max_attempts):
-                        try:
-                            downloaded_file = download_music(youtube_url)
-                            break
-                        except Exception as dl_error:
-                            if attempt == max_attempts - 1:
-                                raise dl_error
-                            print(f"[ASSISTANT] ⚠️ Download attempt {attempt + 1} failed for '{folder_name}'. Retrying...")
-                    
+                    downloaded_file = _download_with_retry(youtube_url, "[ASSISTANT]", folder_name)
+
                     global_state["statusText"] = f"Normalizing theme for: {folder_name}"
                     
                     final_path = generate_destination_path(

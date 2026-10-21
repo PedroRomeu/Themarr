@@ -68,6 +68,59 @@ setTimeout(() => {
     }
 }, 500);
 
+const NO_FOLDER_TEXT = "No folder selected...";
+const START_BTN_IDLE_CLASS = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
+const START_BTN_READY_CLASS = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
+const SPINNER_SVG = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+const EMPTY_QUEUE_HTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
+
+function getMediaFolder() {
+    return document.getElementById('folderPath').innerText;
+}
+
+function hasMediaFolder() {
+    const folder = getMediaFolder();
+    return folder !== NO_FOLDER_TEXT && folder.trim() !== "";
+}
+
+// Shows the standard toast when no Media Directory is selected
+function requireMediaFolder() {
+    if (hasMediaFolder()) return true;
+    showToast("Please select a Media Directory first!", "error");
+    return false;
+}
+
+function getCheckedFolders() {
+    return Array.from(document.querySelectorAll('.folder-checkbox:checked'), chk => chk.value);
+}
+
+// Desktop mode calls the pywebview bridge; browser mode falls back to the Flask route
+async function callBackend(method, args, route, body) {
+    const api = window.pywebview && window.pywebview.api;
+    if (api && api[method]) {
+        return api[method](...args);
+    }
+    const response = await fetch(route, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+    });
+    return response.json();
+}
+
+function setStartButton(ready) {
+    const btnStart = document.getElementById('btnStart');
+    btnStart.className = ready ? START_BTN_READY_CLASS : START_BTN_IDLE_CLASS;
+    btnStart.innerText = "▶ START PROCESSING";
+    btnStart.disabled = !ready;
+}
+
+function resetProgressUI() {
+    document.getElementById('progressBar').style.width = "0%";
+    document.getElementById('percentText').innerText = "0%";
+    document.getElementById('statusText').innerText = "Ready";
+}
+
 function toggleTrackFx() {
     const drawer = document.getElementById('trackFxDrawer');
     drawer.classList.toggle('hidden');
@@ -84,11 +137,7 @@ function toggleFxState(checkboxId, containerId) {
 }
 
 function openDeleteModal() {
-    const folder = document.getElementById('folderPath').innerText; 
-    if (folder === "No folder selected..." || folder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
+    if (!requireMediaFolder()) return;
     document.getElementById('deleteModal').classList.remove('hidden');
 }
 
@@ -103,7 +152,7 @@ function showToast(message, status) {
     
     toastMsg.innerText = message;
 
-    if (status === 'success' || status === 'sucesso') {
+    if (status === 'success') {
         toastIcon.innerText = '✅';
     } else if (status === 'info') {
         toastIcon.innerText = '⏳';
@@ -123,9 +172,7 @@ function showToast(message, status) {
 }
 
 async function triggerDelete(scope) {
-    let selectedFolders = [];
-    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
-    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+    const selectedFolders = getCheckedFolders();
 
     if (scope === 'all') {
         let doubleCheck = confirm(
@@ -152,13 +199,13 @@ async function triggerDelete(scope) {
     }
 
     closeDeleteModal();
-    const folder = document.getElementById('folderPath').innerText;
+    const folder = getMediaFolder();
     showToast("🗑️ Deleting files...", "success");
 
     if (window.pywebview && window.pywebview.api) {
         window.pywebview.api.delete_music_folder(folder, scope, selectedFolders)
         .then(res => {
-            showToast(res.message || res.mensagem, res.status);
+            showToast(res.message, res.status);
         })
         .catch(err => {
             console.error("Delete Python Error:", err);
@@ -168,11 +215,7 @@ async function triggerDelete(scope) {
 }
 
 function openEnhanceModal() {
-    const folder = document.getElementById('folderPath').innerText; 
-    if (folder === "No folder selected..." || folder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
+    if (!requireMediaFolder()) return;
     document.getElementById('enhanceModal').classList.remove('hidden');
 }
 
@@ -183,12 +226,9 @@ function closeEnhanceModal() {
 async function triggerEnhance(scope) {
     closeEnhanceModal();
     
-    const folder = document.getElementById('folderPath').innerText;
-    const currentLufs = parseInt(document.getElementById('lufsInput').value) || -24; 
-    
-    let selectedFolders = [];
-    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
-    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+    const folder = getMediaFolder();
+    const currentLufs = parseInt(document.getElementById('lufsInput').value) || -24;
+    const selectedFolders = getCheckedFolders();
     
     const options = {
         normalize: document.getElementById('chkNormalize').checked,
@@ -203,7 +243,7 @@ async function triggerEnhance(scope) {
         if (window.pywebview && window.pywebview.api) {
             window.pywebview.api.enhance_local_music(folder, scope, currentLufs, options, selectedFolders)
             .then(res => {
-                showToast(res.message || res.mensagem, res.status);
+                showToast(res.message, res.status);
             })
             .catch(err => {
                 console.error("Enhance Python Error:", err);
@@ -273,7 +313,7 @@ setInterval(async () => {
         }
 
         if (data.percentage !== undefined && isProcessing) {
-            window.updateGlobalProgress(data.percentage, data.statusText || data.textoStatus, data.percentageText || data.textoPorcentagem);
+            window.updateGlobalProgress(data.percentage, data.statusText, data.percentageText);
         }
         
         if (data.item_statuses && (isProcessing || data.is_processing)) {
@@ -313,16 +353,16 @@ async function loadFolderCheckboxes(path) {
         container.innerHTML = '';
         
         if (res.status === 'success' && res.folders && res.folders.length > 0) {
-            res.folders.forEach(folder => {
+            container.innerHTML = res.folders.map(folder => {
                 const shouldBeChecked = (res.selected_anime && res.selected_anime === folder) ? 'checked' : '';
-                
-                container.innerHTML += `
+
+                return `
                     <label class="flex items-center gap-2 hover:bg-[#333333] p-1.5 rounded cursor-pointer transition">
                         <input type="checkbox" value="${folder}" class="folder-checkbox w-3.5 h-3.5 accent-blue-500 rounded border-gray-700 bg-gray-800" ${shouldBeChecked}>
                         <span class="text-xs text-gray-300 truncate">${folder}</span>
                     </label>
                 `;
-            });
+            }).join('');
         } else {
             container.innerHTML = '<p class="text-xs text-gray-500 text-center py-2">No subfolders found.</p>';
         }
@@ -335,26 +375,21 @@ function selectFolder() {
     if(isCompleted) {
         musicQueue = [];
         isCompleted = false;
-        document.getElementById('progressBar').style.width = "0%";
-        document.getElementById('percentText').innerText = "0%";
-        document.getElementById('statusText').innerText = "Ready";
-        const btnStart = document.getElementById('btnStart');
-        btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
-        btnStart.innerText = "▶ START PROCESSING";
-        btnStart.disabled = true;
+        resetProgressUI();
+        setStartButton(false);
         document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
         updateQueueUI();
     }
 
     if(window.pywebview) {
         window.pywebview.api.select_folder().then(response => {
-            if(response.success || response.sucesso) {
-                let returnedPath = response.path || response.caminho;
+            if(response.success) {
+                let returnedPath = response.path;
                 document.getElementById('folderPath').innerText = returnedPath;
                 loadFolderCheckboxes(returnedPath);
                 globalDestinationOptions = ['Main Theme'];
                 
-                let returnedSeasons = response.seasons || response.temporadas || [];
+                let returnedSeasons = response.seasons || [];
                 if(returnedSeasons.length === 0) {
                     let folderName = returnedPath.split('\\').pop().split('/').pop();
                     globalDestinationOptions.push(`Season 01. ${folderName}`);
@@ -368,11 +403,9 @@ function selectFolder() {
 }
 
 function updateMainDropdown() {
-    const select = document.getElementById('destinationSelect');
-    select.innerHTML = '';
-    globalDestinationOptions.forEach(op => {
-        select.innerHTML += `<option value="${op}" class="bg-neutral-800 text-white">${op}</option>`;
-    });
+    document.getElementById('destinationSelect').innerHTML = globalDestinationOptions
+        .map(op => `<option value="${op}" class="bg-neutral-800 text-white">${op}</option>`)
+        .join('');
 }
 
 function addToQueue() {
@@ -381,9 +414,7 @@ function addToQueue() {
     if(isCompleted) {
         isCompleted = false;
         musicQueue = [];
-        document.getElementById('progressBar').style.width = "0%";
-        document.getElementById('percentText').innerText = "0%";
-        document.getElementById('statusText').innerText = "Ready";
+        resetProgressUI();
         document.getElementById('logContainer').innerText = "System ready. Awaiting tasks...\n";
         updateQueueUI();
     }
@@ -392,7 +423,6 @@ function addToQueue() {
     const name = document.getElementById('nameInput').value.trim();
     const destination = document.getElementById('destinationSelect').value;
     const lufs = document.getElementById('lufsInput').value;
-    const pathTxt = document.getElementById('folderPath').innerText;
 
     if(!link || (!link.startsWith("https://") && !link.startsWith("http://"))) {
         showToast("Invalid URL format! The address must start with 'http://' or 'https://'.");
@@ -400,7 +430,7 @@ function addToQueue() {
     }
     if(!name) { showToast("Please enter a track name!"); return; }
     if(!destination || destination === "") { showToast("Please select a target folder!"); return; }
-    if(pathTxt === "No folder selected...") { showToast("Please browse for a media folder first!"); return; }
+    if(getMediaFolder() === NO_FOLDER_TEXT) { showToast("Please browse for a media folder first!"); return; }
 
     let customFx = null;
     const fxDrawer = document.getElementById('trackFxDrawer');
@@ -471,41 +501,28 @@ function drop(index) {
 
 function updateQueueUI() {
     const container = document.getElementById('queueContainer');
-    const btnStart = document.getElementById('btnStart');
 
     if (musicQueue.length === 0) {
-        container.innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
-        if (!isCompleted) {
-            btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
-            btnStart.disabled = true;
-            btnStart.innerText = "▶ START PROCESSING";
-        }
+        container.innerHTML = EMPTY_QUEUE_HTML;
+        if (!isCompleted) setStartButton(false);
         return;
     }
 
-    if (!isProcessing && !isCompleted) {
-        btnStart.className = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
-        btnStart.disabled = false;
-        btnStart.innerText = "▶ START PROCESSING";
-    }
+    if (!isProcessing && !isCompleted) setStartButton(true);
 
-    container.innerHTML = "";
-    
-    musicQueue.forEach((item, index) => {
-        let optionsHTML = '';
-        globalDestinationOptions.forEach(op => {
-            let selected = (op === item.destination) ? 'selected' : '';
-            optionsHTML += `<option value="${op}" class="bg-neutral-800 text-white" ${selected}>${op}</option>`;
-        });
+    const itemsHTML = musicQueue.map((item, index) => {
+        const optionsHTML = globalDestinationOptions.map(op =>
+            `<option value="${op}" class="bg-neutral-800 text-white" ${op === item.destination ? 'selected' : ''}>${op}</option>`
+        ).join('');
 
         let statusIcon = "";
         let itemOpacity = "";
-        if (item.status === 'processing' || item.status === 'processando') {
-            statusIcon = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
-        } else if (item.status === 'completed' || item.status === 'concluido') {
+        if (item.status === 'processing') {
+            statusIcon = SPINNER_SVG;
+        } else if (item.status === 'completed') {
             statusIcon = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
             itemOpacity = "opacity-60"; 
-        } else if (item.status === 'error' || item.status === 'erro') {
+        } else if (item.status === 'error') {
             statusIcon = `
                 <div class="group relative flex items-center justify-center w-6 h-6 ml-1">
                     <span class="block group-hover:hidden text-red-500 font-bold text-xs select-none">❌</span>
@@ -544,7 +561,7 @@ function updateQueueUI() {
             dragHandleHTML = '<span class="text-neutral-600 group-hover:text-neutral-400 mr-2 text-xs select-none">⋮⋮</span>';
         }
 
-        const queueItemHTML = `
+        return `
         <div id="queue-item-${index}" data-status="${item.status}" draggable="${dragEnable}" 
                 ondragstart="dragStart(${index}, event)" 
                 ondragend="dragEnd(event)"
@@ -624,8 +641,9 @@ function updateQueueUI() {
 
         </div>
         `;
-        container.innerHTML += queueItemHTML;
     });
+
+    container.innerHTML = itemsHTML.join('');
 }
 
 function retrySingleQueueItem(index) {
@@ -635,8 +653,8 @@ function retrySingleQueueItem(index) {
     const mainCount = musicQueue.filter(m => m.destination === 'Main Theme').length;
     music.has_multi_main = mainCount > 1;
 
-    const folderPath = document.getElementById('folderPath').innerText;
-    if (!folderPath || folderPath === "No folder selected...") {
+    const folderPath = getMediaFolder();
+    if (!folderPath || folderPath === NO_FOLDER_TEXT) {
         showToast("❌ Please select a valid folder first.", "error");
         return;
     }
@@ -670,17 +688,9 @@ function startProcessing() {
     stopQueueAudio();
     if (isCompleted) {
         musicQueue = [];
-        document.getElementById('queueContainer').innerHTML = '<div class="flex h-full items-center justify-center text-neutral-600 text-sm">Queue is empty.</div>';
-        
-        document.getElementById('progressBar').style.width = "0%";
-        document.getElementById('percentText').innerText = "0%";
-        document.getElementById('statusText').innerText = "Ready";
-        
-        const btnStart = document.getElementById('btnStart');
-        btnStart.className = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
-        btnStart.innerText = "▶ START PROCESSING";
-        btnStart.disabled = true;
-        
+        document.getElementById('queueContainer').innerHTML = EMPTY_QUEUE_HTML;
+        resetProgressUI();
+        setStartButton(false);
         isCompleted = false;
         return;
     }
@@ -695,8 +705,8 @@ function startProcessing() {
     btnStart.innerHTML = `<svg class="animate-spin h-4 w-4 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> PROCESSING...`;
     btnStart.disabled = true;
 
-    const mainFolder = document.getElementById('folderPath').innerText.trim();
-    if (!mainFolder || mainFolder === "No folder selected...") {
+    const mainFolder = getMediaFolder().trim();
+    if (!mainFolder || mainFolder === NO_FOLDER_TEXT) {
             alert("Please select a directory first!");
             isProcessing = false;
             updateQueueUI();
@@ -726,16 +736,16 @@ window.updateItemStatus = function(index, newStatus) {
     let statusDiv = item.querySelector('.status-icon');
     if(!statusDiv) return;
 
-    if(newStatus === 'processing' || newStatus === 'processando') {
-        statusDiv.innerHTML = `<svg class="animate-spin h-4 w-4 text-blue-500 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+    if(newStatus === 'processing') {
+        statusDiv.innerHTML = SPINNER_SVG;
         item.classList.remove('opacity-60', 'text-red-400');
         item.classList.add('opacity-100');
-    } else if(newStatus === 'completed' || newStatus === 'concluido') {
+    } else if(newStatus === 'completed') {
         statusDiv.innerHTML = `<span class="text-green-500 ml-2 font-bold">✅</span>`;
         item.classList.remove('opacity-100', 'text-red-400');
         item.classList.add('opacity-60');
         if(musicQueue[index]) musicQueue[index].status = 'completed';
-    } else if(newStatus === 'error' || newStatus === 'erro') {
+    } else if(newStatus === 'error') {
         statusDiv.innerHTML = `<span class="text-red-500 ml-2 text-xs font-bold">❌</span>`;
         item.classList.remove('opacity-100');
         item.classList.add('opacity-60', 'text-red-400');
@@ -755,7 +765,7 @@ window.finalizeProcessingUI = function() {
     btnStart.disabled = false;
     
     musicQueue.forEach((item) => {
-        if(item.status === 'pending' || item.status === 'processing' || item.status === 'pendente' || item.status === 'processando') {
+        if(item.status === 'pending' || item.status === 'processing') {
             item.status = 'completed';
         }
     });
@@ -787,8 +797,8 @@ async function testConnection() {
     try {
         let response = await window.pywebview.api.test_jellyfin(url, api);
 
-        msgEl.innerText = response.message || response.mensagem;
-        if(response.status === 'success' || response.status === 'sucesso') {
+        msgEl.innerText = response.message;
+        if(response.status === 'success') {
             msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-green-500";
         } else {
             msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-red-500";
@@ -1095,18 +1105,7 @@ async function toggleQueuePlay(index, url) {
     timeLabel.innerText = "Loading...";
     
     try {
-        let streamData;
-        
-        if (window.pywebview && window.pywebview.api) {
-            streamData = await window.pywebview.api.get_stream_info(url);
-        } else {
-            const response = await fetch('/api/get_stream_info', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
-            });
-            streamData = await response.json();
-        }
+        const streamData = await callBackend('get_stream_info', [url], '/api/get_stream_info', { url: url });
         
         if (streamData && streamData.success) {
             currentPlayingIndex = index;
@@ -1183,7 +1182,7 @@ function stopQueueAudio() {
 }
 
 function formatSeconds(seconds) {
-    if (isNaN(seconds)) return "0:00";
+    if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -1208,15 +1207,11 @@ let libraryData = [];
 let libraryAudio = new Audio();
 let currentLibPlayingAnimeIdx = null;
 let currentLibPlayingTrackIdx = null;
-let libAudioTimer = null;
 
 function openLibraryModal() {
-    const baseFolder = document.getElementById('folderPath').innerText;
-    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
-    
+    if (!requireMediaFolder()) return;
+
+        
     document.getElementById('libraryModal').classList.remove('hidden');
     
     document.getElementById('libLufsInput').value = document.getElementById('lufsInput').value;
@@ -1272,16 +1267,12 @@ async function loadLibraryData(preserveState = false) {
         `;
     }
     
-    const baseFolder = document.getElementById('folderPath').innerText;
-    
-    let selectedFolders = [];
-    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
-    checkboxes.forEach(chk => selectedFolders.push(chk.value));
+    const baseFolder = getMediaFolder();
+    const selectedFolders = getCheckedFolders();
 
     if (selectedFolders.length === 0) {
-        const folderPathText = document.getElementById('folderPath').innerText;
-        if (folderPathText && folderPathText !== "No folder selected...") {
-            const parts = folderPathText.split(/[\\/]/);
+        if (baseFolder && baseFolder !== NO_FOLDER_TEXT) {
+            const parts = baseFolder.split(/[\\/]/);
             const lastPart = parts[parts.length - 1];
             if (lastPart) {
                 selectedFolders.push(lastPart);
@@ -1545,15 +1536,8 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
     const slider = document.getElementById(`libSlider-${animeIdx}-${trackIdx}`);
     const timeLabel = document.getElementById(`libTimeLabel-${animeIdx}-${trackIdx}`);
 
-    const formatLibTime = (secs) => {
-        if (isNaN(secs) || !isFinite(secs)) return "0:00";
-        const m = Math.floor(secs / 60);
-        const s = Math.floor(secs % 60);
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-    };
-
     libraryAudio.onloadedmetadata = () => {
-        timeLabel.innerText = `0:00 / ${formatLibTime(libraryAudio.duration)}`;
+        timeLabel.innerText = `0:00 / ${formatSeconds(libraryAudio.duration)}`;
     };
 
     libraryAudio.ontimeupdate = () => {
@@ -1561,7 +1545,7 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
         const current = libraryAudio.currentTime;
         const total = libraryAudio.duration;
         slider.value = (current / total) * 100;
-        timeLabel.innerText = `${formatLibTime(current)} / ${formatLibTime(total)}`;
+        timeLabel.innerText = `${formatSeconds(current)} / ${formatSeconds(total)}`;
     };
 
     libraryAudio.onended = () => {
@@ -1574,11 +1558,6 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx, encodedPath) {
 }
 
 function stopLibraryAudio() {
-    if (libAudioTimer) {
-        clearInterval(libAudioTimer);
-        libAudioTimer = null;
-    }
-    
     libraryAudio.pause();
     
     if (currentLibPlayingAnimeIdx !== null && currentLibPlayingTrackIdx !== null) {
@@ -1745,21 +1724,16 @@ let activeTempImportId = null;
 let activeMissingFolders = [];
 
 async function exportLibraryBackup() {
-    const baseFolder = document.getElementById('folderPath').innerText;
-    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
+    if (!requireMediaFolder()) return;
+    const baseFolder = getMediaFolder();
 
     const confirmMessage = "You are about to export a backup of your media folders along with their theme music tracks.\n\nA compressed ZIP file will be created inside the 'backups' directory.\n\nDo you want to proceed?";
     if (!confirm(confirmMessage)) {
         return; 
     }
     
-    let selectedFolders = [];
-    const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
-    checkboxes.forEach(chk => selectedFolders.push(chk.value));
-    
+    const selectedFolders = getCheckedFolders();
+
     if (selectedFolders.length === 0 && libraryScope === 'selected') {
         const parts = baseFolder.split(/[\\/]/);
         const lastPart = parts[parts.length - 1];
@@ -1771,7 +1745,8 @@ async function exportLibraryBackup() {
     showToast("Generating compressed backup zip...", "info");
     
     try {
-        const response = await window.pywebview.api.export_media_backup(baseFolder, libraryScope, selectedFolders);
+        const response = await callBackend('export_media_backup', [baseFolder, libraryScope, selectedFolders], '/api/library/backup/export',
+            { base_path: baseFolder, scope: libraryScope, selected_folders: selectedFolders });
         if (response.success) {
             showToast(`Exported! Saved to backups/${response.filename}`, "success");
         } else {
@@ -1784,22 +1759,13 @@ async function exportLibraryBackup() {
 }
 
 async function importLibraryBackup() {
-    const baseFolder = document.getElementById('folderPath').innerText;
-    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
+    if (!requireMediaFolder()) return;
+    const baseFolder = getMediaFolder();
 
     showToast("📂 Select backup ZIP file...", "info");
 
     try {
-        let selectRes;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.select_backup_file) {
-            selectRes = await window.pywebview.api.select_backup_file();
-        } else {
-            const response = await fetch('/api/library/backup/select_file', { method: 'POST' });
-            selectRes = await response.json();
-        }
+        const selectRes = await callBackend('select_backup_file', [], '/api/library/backup/select_file');
 
         if (!selectRes || !selectRes.success || !selectRes.file_path) {
             showToast("Import cancelled or no file selected.", "info");
@@ -1809,17 +1775,8 @@ async function importLibraryBackup() {
         const zipPath = selectRes.file_path;
         showToast("⏳ Analyzing backup files...", "info");
 
-        let analyzeRes;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.analyze_backup) {
-            analyzeRes = await window.pywebview.api.analyze_backup(zipPath, baseFolder);
-        } else {
-            const response = await fetch('/api/library/backup/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ zip_path: zipPath, base_path: baseFolder })
-            });
-            analyzeRes = await response.json();
-        }
+        const analyzeRes = await callBackend('analyze_backup', [zipPath, baseFolder], '/api/library/backup/analyze',
+            { zip_path: zipPath, base_path: baseFolder });
 
         if (!analyzeRes.success) {
             showToast("Error analyzing backup: " + analyzeRes.message, "error");
@@ -1832,15 +1789,12 @@ async function importLibraryBackup() {
         if (activeMissingFolders && activeMissingFolders.length > 0) {
             const listEl = document.getElementById('importMissingFoldersList');
             if (listEl) {
-                listEl.innerHTML = '';
-                activeMissingFolders.forEach(folder => {
-                    listEl.innerHTML += `
+                listEl.innerHTML = activeMissingFolders.map(folder => `
                         <div class="flex items-center gap-2 text-xs text-neutral-300 py-0.5">
                             <span class="text-neutral-500 text-[11px]">📁</span>
                             <span class="truncate font-medium">${folder}</span>
                         </div>
-                    `;
-                });
+                    `).join('');
             }
             document.getElementById('importBackupModal').classList.remove('hidden');
         } else {
@@ -1861,40 +1815,19 @@ async function finalizeImportDecision(decision) {
 
     if (decision === 'cancel') {
         showToast("Import cancelled.", "info");
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.finalize_backup_import) {
-            await window.pywebview.api.finalize_backup_import(activeTempImportId, "", 'cancel', []);
-        } else {
-            await fetch('/api/library/backup/finalize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ temp_import_id: activeTempImportId, base_path: "", decision: 'cancel', missing_folders: [] })
-            });
-        }
+        await callBackend('finalize_backup_import', [activeTempImportId, "", 'cancel', []], '/api/library/backup/finalize',
+            { temp_import_id: activeTempImportId, base_path: "", decision: 'cancel', missing_folders: [] });
         activeTempImportId = null;
         activeMissingFolders = [];
         return;
     }
 
     showToast("Restoring music tracks...", "info");
-    const baseFolder = document.getElementById('folderPath').innerText;
+    const baseFolder = getMediaFolder();
 
     try {
-        let res;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.finalize_backup_import) {
-            res = await window.pywebview.api.finalize_backup_import(activeTempImportId, baseFolder, decision, activeMissingFolders);
-        } else {
-            const response = await fetch('/api/library/backup/finalize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    temp_import_id: activeTempImportId,
-                    base_path: baseFolder,
-                    decision: decision,
-                    missing_folders: activeMissingFolders
-                })
-            });
-            res = await response.json();
-        }
+        const res = await callBackend('finalize_backup_import', [activeTempImportId, baseFolder, decision, activeMissingFolders], '/api/library/backup/finalize',
+            { temp_import_id: activeTempImportId, base_path: baseFolder, decision: decision, missing_folders: activeMissingFolders });
 
         if (res.success) {
             showToast(res.message, "success");
@@ -1916,11 +1849,8 @@ let assistantPlayingRow = null;
 let assistantMediaList = [];
 
 async function openAssistantModal() {
-    const baseFolder = document.getElementById('folderPath').innerText;
-    if (baseFolder === "No folder selected..." || baseFolder.trim() === "") {
-        showToast("Please select a Media Directory first!", "error");
-        return;
-    }
+    if (!requireMediaFolder()) return;
+    const baseFolder = getMediaFolder();
 
     assistantMediaList = [];
     stopAssistantAudio();
@@ -1932,17 +1862,8 @@ async function openAssistantModal() {
     document.getElementById('assistantFooter').classList.add('hidden');
 
     try {
-        let res;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.scan_missing_themes) {
-            res = await window.pywebview.api.scan_missing_themes(baseFolder, "all");
-        } else {
-            const response = await fetch('/api/library/assistant/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ base_path: baseFolder, scope: "all" })
-            });
-            res = await response.json();
-        }
+        const res = await callBackend('scan_missing_themes', [baseFolder, "all"], '/api/library/assistant/scan',
+            { base_path: baseFolder, scope: "all" });
 
         if (!res.success) {
             showToast("Failed to scan library: " + res.message, "error");
@@ -1962,10 +1883,7 @@ async function openAssistantModal() {
         document.getElementById('assistantFooter').classList.remove('hidden');
 
         const container = document.getElementById('assistantMediaList');
-        container.innerHTML = '';
-
-        assistantMediaList.forEach((media, idx) => {
-            container.innerHTML += `
+        container.innerHTML = assistantMediaList.map((media, idx) => `
                 <div id="assistant-row-${idx}" class="flex flex-col gap-2 p-3 bg-neutral-900/40 hover:bg-neutral-850/30 border border-neutral-800 rounded-md transition-all">
                     <div class="flex items-center justify-between gap-3 flex-wrap">
                         <div class="flex items-center gap-2.5 min-w-[200px] flex-1">
@@ -1986,8 +1904,7 @@ async function openAssistantModal() {
                         </div>
                     </div>
                 </div>
-            `;
-        });
+            `).join('');
 
         assistantMediaList.forEach((media, idx) => {
             fetchSuggestionsForMediaRow(media.folder_name, idx);
@@ -2007,17 +1924,8 @@ function closeAssistantModal() {
 
 async function fetchSuggestionsForMediaRow(folderName, idx) {
     try {
-        let res;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.get_media_theme_suggestions) {
-            res = await window.pywebview.api.get_media_theme_suggestions(folderName);
-        } else {
-            const response = await fetch('/api/library/assistant/suggestions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ folder_name: folderName })
-            });
-            res = await response.json();
-        }
+        const res = await callBackend('get_media_theme_suggestions', [folderName], '/api/library/assistant/suggestions',
+            { folder_name: folderName });
 
         const suggContainer = document.getElementById(`assistant-sugg-container-${idx}`);
         const metaEl = document.getElementById(`assistant-meta-${idx}`);
@@ -2036,15 +1944,14 @@ async function fetchSuggestionsForMediaRow(folderName, idx) {
         metaEl.innerText = res.genres ? `${res.genres}` : "Media (No genres)";
         metaEl.title = `Official Name: ${res.official_name}`;
 
-        let optionsHTML = '';
-        res.suggestions.forEach((sugg, sIdx) => {
+        const optionsHTML = res.suggestions.map((sugg, sIdx) => {
             const escTitle = sugg.title.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-            optionsHTML += `
+            return `
                 <option value="${sugg.url}" data-title="${escTitle}" class="bg-neutral-900 text-neutral-200">
                     #${sIdx + 1}: ${sugg.title.substring(0, 42)}... (${sugg.duration})
                 </option>
             `;
-        });
+        }).join('');
 
         const defaultFilename = `${res.official_name} - Theme`;
 
@@ -2120,17 +2027,7 @@ async function toggleAssistantPreview(idx) {
     playBtn.disabled = true;
 
     try {
-        let streamData;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.get_stream_info) {
-            streamData = await window.pywebview.api.get_stream_info(url);
-        } else {
-            const response = await fetch('/api/get_stream_info', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
-            });
-            streamData = await response.json();
-        }
+        const streamData = await callBackend('get_stream_info', [url], '/api/get_stream_info', { url: url });
 
         if (streamData && streamData.success) {
             assistantPlayingRow = idx;
@@ -2176,7 +2073,7 @@ function stopAssistantAudio() {
 }
 
 async function triggerAssistantDownloads() {
-    const baseFolder = document.getElementById('folderPath').innerText;
+    const baseFolder = getMediaFolder();
     const downloadList = [];
 
     assistantMediaList.forEach((media, idx) => {
@@ -2204,17 +2101,8 @@ async function triggerAssistantDownloads() {
     showToast("🤖 Auto-downloads started in the background!", "success");
 
     try {
-        let res;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.process_assistant_downloads) {
-            res = await window.pywebview.api.process_assistant_downloads(downloadList, baseFolder);
-        } else {
-            const response = await fetch('/api/library/assistant/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ download_list: downloadList, base_folder: baseFolder })
-            });
-            res = await response.json();
-        }
+        const res = await callBackend('process_assistant_downloads', [downloadList, baseFolder], '/api/library/assistant/download',
+            { download_list: downloadList, base_folder: baseFolder });
 
         if (res.success) {
             isProcessing = true;

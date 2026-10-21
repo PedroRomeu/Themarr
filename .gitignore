@@ -19,3 +19,5 @@ dist/
 # Backups
 versions/
 logo.ico/
+# Backups exportados pelo app
+backups/

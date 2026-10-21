@@ -44,23 +44,77 @@ def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_e
     return ",".join(filters)
 
 
+def _run_ffmpeg(command):
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    subprocess.run(command, check=True, startupinfo=startupinfo)
+
+
+def _remove_quietly(path):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def _pre_trim(input_file, ss_sec, to_sec, error_label):
+    """Cuts input_file to [ss_sec, to_sec] into a temp file (timestamps reset) and returns its path"""
+    temp_trimmed_file = None
+    try:
+        ext = os.path.splitext(input_file)[1] or '.mp3'
+        fd, temp_trimmed_file = tempfile.mkstemp(suffix=ext)
+        os.close(fd)
+
+        trim_cmd = [FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y']
+
+        if ss_sec is not None:
+            trim_cmd += ['-ss', str(ss_sec)]
+
+        if to_sec is not None:
+            start_offset = ss_sec if ss_sec is not None else 0.0
+            duration = to_sec - start_offset
+            trim_cmd += ['-t', str(duration)]
+
+        trim_cmd += ['-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '320k', temp_trimmed_file]
+
+        _run_ffmpeg(trim_cmd)
+        return temp_trimmed_file
+
+    except Exception as trim_err:
+        print(f"[AUDIO] {error_label}: {trim_err}")
+        _remove_quietly(temp_trimmed_file)
+        raise
+
+
+def _encode_with_filters(input_file, filter_chain, output_path):
+    _run_ffmpeg([
+        FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', input_file,
+        '-vn',
+        '-filter:a', filter_chain,
+        '-b:a', '320k',
+        output_path
+    ])
+
+
 def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=None, start_time=None, end_time=None):
     dir_name, file_name = os.path.split(full_output_path)
-    
+
     forbidden_chars = ['|', '*', '?', ':', '"', '<', '>', '/', '\\']
     for char in forbidden_chars:
-        file_name = file_name.replace(char, '-') 
-        
+        file_name = file_name.replace(char, '-')
+
     while '  ' in file_name:
         file_name = file_name.replace('  ', ' ')
-        
+
     full_output_path = os.path.join(dir_name, file_name)
-    
+
     print(f"\n[AUDIO] Enhancing & Normalizing -> {full_output_path}")
-    
+
     ss_sec = parse_time_to_seconds(start_time)
     to_sec = parse_time_to_seconds(end_time)
-    
+
     if ss_sec is not None:
         print(f"[AUDIO] Trim Start Configured: {ss_sec}s")
     if to_sec is not None:
@@ -70,67 +124,22 @@ def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=
         audio_effects = {}
     else:
         audio_effects = dict(audio_effects)
-        
+
+    temp_trimmed_file = None
+
     if ss_sec is not None or to_sec is not None:
         audio_effects['remove_silence'] = False
         print("[AUDIO] Manual trim active: forcing 'remove_silence' to False to prevent timeline shifting.")
-
-    temp_trimmed_file = None
-    
-    if ss_sec is not None or to_sec is not None:
         print("[AUDIO] ✂️ Applying pre-trim to audio file before applying effects...")
-        try:
-            ext = os.path.splitext(input_file)[1] or '.mp3'
-            fd, temp_trimmed_file = tempfile.mkstemp(suffix=ext)
-            os.close(fd)
-            
-            trim_cmd = [FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y']
-            
-            if ss_sec is not None:
-                trim_cmd += ['-ss', str(ss_sec)]
-                
-            if to_sec is not None:
-                start_offset = ss_sec if ss_sec is not None else 0.0
-                duration = to_sec - start_offset
-                trim_cmd += ['-t', str(duration)]
-            
-            trim_cmd += ['-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '320k', temp_trimmed_file]
-            
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-            subprocess.run(trim_cmd, check=True, startupinfo=startupinfo)
-            
-            input_file = temp_trimmed_file
-            print("[AUDIO] Pre-trim applied successfully with reset timestamps!")
-            
-        except Exception as trim_err:
-            print(f"[AUDIO] Critical Error during pre-trim: {trim_err}")
-            if temp_trimmed_file and os.path.exists(temp_trimmed_file):
-                try:
-                    os.remove(temp_trimmed_file)
-                except:
-                    pass
-            raise trim_err
+        temp_trimmed_file = _pre_trim(input_file, ss_sec, to_sec, "Critical Error during pre-trim")
+        input_file = temp_trimmed_file
+        print("[AUDIO] Pre-trim applied successfully with reset timestamps!")
 
     try:
         filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects)
-        
-        command = [
-            FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-            '-i', input_file,
-            '-vn',
-            '-filter:a', filter_chain, 
-            '-b:a', '320k',
-            full_output_path
-        ]
-        
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        
-        subprocess.run(command, check=True, startupinfo=startupinfo)
+        _encode_with_filters(input_file, filter_chain, full_output_path)
         print("[AUDIO] ✨ Success! File is treated, trimmed, normalized and ready.")
-        
+
     finally:
         if temp_trimmed_file and os.path.exists(temp_trimmed_file):
             try:
@@ -147,76 +156,29 @@ def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_
     if audio_effects is None:
         audio_effects = {}
 
-    start_time = audio_effects.get("start_time")
-    end_time = audio_effects.get("end_time")
-
-    ss_sec = parse_time_to_seconds(start_time)
-    to_sec = parse_time_to_seconds(end_time)
+    ss_sec = parse_time_to_seconds(audio_effects.get("start_time"))
+    to_sec = parse_time_to_seconds(audio_effects.get("end_time"))
 
     dir_name, file_name = os.path.split(mp3_path)
     temp_output = os.path.join(dir_name, f"temp_proc_{file_name}")
-    
+
     input_file = mp3_path
     temp_trimmed_file = None
 
     if ss_sec is not None or to_sec is not None:
-        try:
-            ext = os.path.splitext(input_file)[1] or '.mp3'
-            fd, temp_trimmed_file = tempfile.mkstemp(suffix=ext)
-            os.close(fd)
-            
-            trim_cmd = [FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y']
-            
-            if ss_sec is not None:
-                trim_cmd += ['-ss', str(ss_sec)]
-                
-            if to_sec is not None:
-                start_offset = ss_sec if ss_sec is not None else 0.0
-                duration = to_sec - start_offset
-                trim_cmd += ['-t', str(duration)]
-            
-            trim_cmd += ['-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '320k', temp_trimmed_file]
-            
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-            subprocess.run(trim_cmd, check=True, startupinfo=startupinfo)
-            input_file = temp_trimmed_file
-            
-        except Exception as trim_err:
-            print(f"[AUDIO] Error during local pre-trim: {trim_err}")
-            if temp_trimmed_file and os.path.exists(temp_trimmed_file):
-                try: os.remove(temp_trimmed_file)
-                except: pass
-            raise trim_err
+        temp_trimmed_file = _pre_trim(input_file, ss_sec, to_sec, "Error during local pre-trim")
+        input_file = temp_trimmed_file
 
     try:
         filter_chain = build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_enabled)
-        
-        command = [
-            FFMPEG_PATH, '-hide_banner', '-loglevel', 'error', '-y',
-            '-i', input_file,
-            '-vn',
-            '-filter:a', filter_chain, 
-            '-b:a', '320k',
-            temp_output
-        ]
-        
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        
-        subprocess.run(command, check=True, startupinfo=startupinfo)
-        
+        _encode_with_filters(input_file, filter_chain, temp_output)
+
         if os.path.exists(temp_output):
             shutil.move(temp_output, mp3_path)
-            
+
     finally:
-        if temp_trimmed_file and os.path.exists(temp_trimmed_file):
-            try: os.remove(temp_trimmed_file)
-            except: pass
-        if os.path.exists(temp_output):
-            try: os.remove(temp_output)
-            except: pass
+        _remove_quietly(temp_trimmed_file)
+        _remove_quietly(temp_output)
 
 def parse_time_to_seconds(time_str):
     """Convert time strings like '5', '0:05', '1:08' ou '01:08' in pure seconds (float/int)"""
