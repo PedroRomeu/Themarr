@@ -21,7 +21,8 @@ services:
       # Start read-only (:ro) and switch to read-write only once everything is verified.
       - /media/hd_ext/Medias:/data:ro
     ports:
-      # Bound to localhost by default: expose it through your VPN (e.g. tailscale serve), never publicly
+      # Bound to localhost by default: expose it through your VPN (e.g. tailscale serve), never publicly.
+      # Server-specific extras (home network IP, read-write media) belong in a docker-compose.override.yml.
       - "${THEMARR_BIND:-127.0.0.1}:8686:8686"
     networks:
       - jellyfin_default

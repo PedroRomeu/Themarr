@@ -5,7 +5,12 @@
 (function () {
     'use strict';
 
-    const THEMARR_URL = 'https://servermain.tail94f464.ts.net:8686';
+    // Same network as the Jellyfin page: home network -> local address, anything else (tailnet, Funnel) -> tailnet address
+    const THEMARR_LAN_URL = 'http://192.168.100.211:8686';
+    const THEMARR_TAILNET_URL = 'https://servermain.tail94f464.ts.net:8686';
+    const host = window.location.hostname;
+    const onHomeNetwork = host === 'localhost' || /^(192\.168|10)\.\d+\.\d+$/.test(host) || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
+    const THEMARR_URL = onHomeNetwork ? THEMARR_LAN_URL : THEMARR_TAILNET_URL;
     const ITEM_TYPES = ['Series', 'Season', 'Episode', 'Movie'];
     const DETAIL_BUTTON_CLASS = 'themarrDetailButton';
     const HEADER_BUTTON_ID = 'themarrHeaderButton';
