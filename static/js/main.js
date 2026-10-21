@@ -1869,8 +1869,15 @@ async function applyAllTracksInMedia(mediaIdx) {
     
     stopLibraryAudio();
     
-    const promises = media.tracks.map((_, trackIdx) => processSingleLibraryTrack(mediaIdx, trackIdx, false));
-    await Promise.all(promises);
+    if (SERVER_MODE) {
+        // One track at a time on the server, so Jellyfin keeps its CPU and memory
+        for (let trackIdx = 0; trackIdx < media.tracks.length; trackIdx++) {
+            await processSingleLibraryTrack(mediaIdx, trackIdx, false);
+        }
+    } else {
+        const promises = media.tracks.map((_, trackIdx) => processSingleLibraryTrack(mediaIdx, trackIdx, false));
+        await Promise.all(promises);
+    }
     
     setTimeout(() => {
         loadLibraryData(true);

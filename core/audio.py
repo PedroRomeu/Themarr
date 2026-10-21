@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import shutil
+import threading
 import yt_dlp
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, error, TIT2, TALB, TCON
@@ -45,7 +46,18 @@ def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_e
     return ",".join(filters)
 
 
+# The server has 2 cores shared with Jellyfin: only one ffmpeg job at a time there
+_SERVER_FFMPEG_LOCK = threading.Lock()
+
+
 def _run_ffmpeg(command):
+    if SERVER_MODE:
+        with _SERVER_FFMPEG_LOCK:
+            return _run_ffmpeg_now(command)
+    return _run_ffmpeg_now(command)
+
+
+def _run_ffmpeg_now(command):
     startupinfo = None
     if IS_WINDOWS:
         # Keeps the ffmpeg console window hidden on Windows
