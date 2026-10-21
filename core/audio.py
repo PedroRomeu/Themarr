@@ -244,15 +244,30 @@ def parse_time_to_seconds(time_str):
     return None
 
 
+def youtube_options():
+    """Base yt-dlp options for YouTube: JS runtime for the n/sig challenge (needs yt-dlp-ejs) and fallback player clients"""
+    js_runtimes = {'node': {}}
+    bundled_deno = os.path.join(os.path.dirname(FFMPEG_PATH), 'deno.exe')
+    if os.path.exists(bundled_deno):
+        js_runtimes['deno'] = {'path': bundled_deno}
+    elif shutil.which('deno'):
+        js_runtimes['deno'] = {}
+
+    return {
+        'format': 'bestaudio/best',
+        'js_runtimes': js_runtimes,
+        # 'default' often hits the bot check; web_embedded still serves opus 251, android/mweb fall back to format 18
+        'extractor_args': {'youtube': {'player_client': ['default', 'web_embedded', 'android', 'mweb']}},
+    }
+
 def get_streaming_url(youtube_url):
     """Extract the direct audio URL from YouTube and the total duration in seconds (without downloading anything)"""
     try:
         ydl_opts = {
-            'format': 'bestaudio/best',
+            **youtube_options(),
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            'force_generic_extractor': False
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
@@ -271,9 +286,8 @@ def download_music(youtube_url):
     os_temp_folder = tempfile.gettempdir() 
     
     options = {
-        'format': 'bestaudio/best',
+        **youtube_options(),
         'ffmpeg_location': FFMPEG_PATH,
-        'extractor_args': {'youtube': {'client': ['android']}},
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
         'outtmpl': os.path.join(os_temp_folder, '%(title)s.%(ext)s'),
         'nocolor': True,
