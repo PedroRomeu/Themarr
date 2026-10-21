@@ -562,20 +562,31 @@
     </div>
 
     <!-- Server mode: folder browser (replaces the native Browse dialog) -->
-    <div id="folderBrowserModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-        <div class="bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl p-5 w-full max-w-lg flex flex-col max-h-[80vh]">
+    <div id="folderBrowserModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl p-5 w-full max-w-2xl flex flex-col max-h-[85vh]">
             <div class="flex justify-between items-center mb-3">
                 <h2 class="text-sm font-semibold text-neutral-200 uppercase tracking-wider">📂 Select Media Folder</h2>
-                <button onclick="closeFolderBrowser()" class="text-neutral-400 hover:text-white">&times;</button>
+                <button onclick="closeFolderBrowser()" class="text-neutral-400 hover:text-white text-lg leading-none">&times;</button>
             </div>
-            <div class="flex items-center gap-2 mb-3">
-                <button id="folderBrowserUp" onclick="browseServerFolder(folderBrowserParent)" class="px-2.5 py-1 bg-neutral-900 border border-neutral-700 rounded text-xs text-neutral-300 hover:text-white disabled:opacity-40">⬆ Up</button>
-                <span id="folderBrowserPath" class="text-xs text-neutral-400 truncate min-w-0 flex-1"></span>
+
+            <div class="relative mb-2">
+                <input type="text" id="folderBrowserInput" autocomplete="off" spellcheck="false"
+                       oninput="onFolderPathInput()" onkeydown="onFolderPathKey(event)"
+                       class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-xs font-mono text-neutral-200 focus:outline-none focus:border-blue-500"
+                       placeholder="/data/Animes">
+                <div id="folderBrowserSuggestions" class="hidden absolute left-0 right-0 top-full mt-1 bg-neutral-900 border border-neutral-700 rounded-md shadow-xl max-h-56 overflow-y-auto z-10"></div>
             </div>
-            <div id="folderBrowserList" class="flex-1 overflow-y-auto bg-neutral-900/60 border border-neutral-700 rounded p-1 space-y-0.5 min-h-[200px]"></div>
-            <div class="flex justify-end gap-2 mt-4">
-                <button onclick="closeFolderBrowser()" class="px-4 py-2 bg-neutral-900 border border-neutral-700 text-neutral-300 rounded text-xs font-semibold">Cancel</button>
-                <button onclick="chooseServerFolder()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold">Select this folder</button>
+
+            <div id="folderBrowserBreadcrumb" class="flex flex-wrap items-center gap-1 text-[11px] text-neutral-400 mb-2 min-w-0"></div>
+
+            <div id="folderBrowserList" class="flex-1 overflow-y-auto bg-neutral-900/60 border border-neutral-700 rounded p-1 space-y-0.5 min-h-[240px]"></div>
+
+            <div class="flex items-center justify-between gap-2 mt-4">
+                <button id="folderBrowserUp" onclick="browseServerFolder(folderBrowserParent)" class="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-neutral-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">⬆ Up</button>
+                <div class="flex gap-2">
+                    <button onclick="closeFolderBrowser()" class="px-4 py-2 bg-neutral-900 border border-neutral-700 text-neutral-300 rounded text-xs font-semibold">Cancel</button>
+                    <button onclick="chooseServerFolder()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold">Select this folder</button>
+                </div>
             </div>
         </div>
     </div>

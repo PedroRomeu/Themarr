@@ -15,10 +15,10 @@ except ImportError:  # headless server: no native windows or dialogs
     webview = None
 
 from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR
-from core.safety import check_theme_write, check_media_read, is_theme_file, theme_files_only, UnsafeMediaOperation
+from core.safety import check_theme_write, check_media_read, is_theme_file, is_season_folder_name, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
-from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item
+from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name, safe_move
 
 global_state = {
@@ -251,6 +251,30 @@ def _list_season_folders(folder):
                 seasons.append(item)
     return sorted(seasons)
 
+def _count_mp3(folder):
+    try:
+        return sum(1 for f in os.listdir(folder) if f.lower().endswith('.mp3'))
+    except OSError:
+        return 0
+
+def _count_theme_files(folder):
+    """Themes of a media or season folder: theme.mp3, theme-music/ and the theme-music of its seasons"""
+    count = 0
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return 0
+    for name in entries:
+        path = os.path.join(folder, name)
+        if name.lower() == 'theme.mp3' and os.path.isfile(path):
+            count += 1
+        elif os.path.isdir(path):
+            if name.lower() == 'theme-music':
+                count += _count_mp3(path)
+            elif is_season_folder_name(name):
+                count += _count_mp3(os.path.join(path, 'theme-music'))
+    return count
+
 def _powershell_dialog(script):
     res = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
@@ -295,19 +319,65 @@ class Api:
         }
         
     def browse_media_folders(self, folder=None):
-        """Server folder browser: subfolders of `folder`, never above MEDIA_ROOT"""
+        """Server folder browser: subfolders of `folder` with Jellyfin and theme details, never above MEDIA_ROOT"""
         root = MEDIA_ROOT or os.path.abspath(os.sep)
         current = os.path.realpath(folder) if folder else root
         check_media_read(current)
         if not os.path.isdir(current):
             current = root
         try:
-            folders = sorted((f for f in os.listdir(current) if os.path.isdir(os.path.join(current, f)) and not f.startswith('.')),
-                             key=str.lower)
+            names = sorted((f for f in os.listdir(current) if os.path.isdir(os.path.join(current, f)) and not f.startswith('.')),
+                           key=str.lower)
         except OSError as e:
             return {"success": False, "message": str(e)}
+
+        # Depth below the media root: 0 = root, 1 = library (Animes), 2 = media, 3 = season
+        depth = 0 if current == root else len(os.path.relpath(current, root).split(os.sep))
+
+        index = []
+        if depth + 1 == 2:
+            config = load_config()
+            if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
+                index = get_library_index(config["jelly_url"], config["jelly_api"])
+
+        folders = []
+        for name in names:
+            path = os.path.join(current, name)
+            entry = {"name": name, "path": path, "season": depth + 1 == 3 and is_season_folder_name(name),
+                     "jellyfin": None, "themes": None}
+            if depth + 1 >= 2 and name.lower() != 'theme-music':
+                entry["themes"] = _count_theme_files(path) if not entry["season"] else _count_mp3(os.path.join(path, 'theme-music'))
+            if index:
+                item = match_media_folder(index, path)
+                entry["jellyfin"] = item.get("Name") if item else None
+            folders.append(entry)
+
+        breadcrumb = [{"name": os.path.basename(root) or root, "path": root}]
+        if current != root:
+            walked = root
+            for part in os.path.relpath(current, root).split(os.sep):
+                walked = os.path.join(walked, part)
+                breadcrumb.append({"name": part, "path": walked})
+
         parent = os.path.dirname(current) if current != root else None
-        return {"success": True, "path": current, "parent": parent, "root": root, "folders": folders}
+        return {"success": True, "path": current, "parent": parent, "root": root, "folders": folders, "breadcrumb": breadcrumb}
+
+    def suggest_media_folders(self, text):
+        """Autocomplete for the path field: folders whose name starts with what was typed after the last /"""
+        root = MEDIA_ROOT or os.path.abspath(os.sep)
+        text = (text or '').strip()
+        if not text:
+            return {"success": True, "suggestions": [root]}
+        base, fragment = (text.rstrip('/\\'), '') if text.endswith(('/', '\\')) else (os.path.dirname(text), os.path.basename(text))
+        base = os.path.realpath(base or root)
+        try:
+            check_media_read(base)
+            names = [n for n in os.listdir(base) if os.path.isdir(os.path.join(base, n)) and not n.startswith('.')]
+        except (UnsafeMediaOperation, OSError):
+            return {"success": True, "suggestions": []}
+        fragment = fragment.casefold()
+        matches = sorted((n for n in names if n.casefold().startswith(fragment)), key=str.lower)[:15]
+        return {"success": True, "suggestions": [os.path.join(base, n) for n in matches]}
 
     def select_server_folder(self, folder):
         """Chosen in the folder browser; same response shape as select_folder"""

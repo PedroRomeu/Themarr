@@ -77,6 +77,11 @@ def register_routes(app, api_system):
         data = request.get_json(force=True, silent=True) or {}
         return jsonify(api_system.browse_media_folders(data.get('folder')))
 
+    @app.route('/api/suggest_folders', methods=['POST'])
+    def api_flask_suggest_folders():
+        data = request.get_json(force=True, silent=True) or {}
+        return jsonify(api_system.suggest_media_folders(data.get('text', '')))
+
     @app.route('/api/select_server_folder', methods=['POST'])
     def api_flask_select_server_folder():
         data = request.get_json(force=True, silent=True) or {}

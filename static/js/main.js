@@ -434,19 +434,40 @@ function selectFolder() {
 
 let folderBrowserCurrent = null;
 let folderBrowserParent = null;
+let folderSuggestTimer = null;
+let folderSuggestIndex = -1;
 
 function openFolderBrowser() {
     document.getElementById('folderBrowserModal').classList.remove('hidden');
     const current = hasMediaFolder() ? getMediaFolder() : null;
     browseServerFolder(current);
+    setTimeout(() => document.getElementById('folderBrowserInput').focus(), 50);
 }
 
 function closeFolderBrowser() {
+    hideFolderSuggestions();
     document.getElementById('folderBrowserModal').classList.add('hidden');
+}
+
+function folderBadges(folder) {
+    const badges = [];
+    if (folder.season) {
+        badges.push('<span class="px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-400">Season</span>');
+    }
+    if (folder.jellyfin) {
+        badges.push(`<span class="px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-900/60 text-blue-300 truncate max-w-[220px]" title="Jellyfin: ${escapeHtml(folder.jellyfin)}">Jellyfin: ${escapeHtml(folder.jellyfin)}</span>`);
+    }
+    if (folder.themes !== null && folder.themes !== undefined) {
+        badges.push(folder.themes > 0
+            ? `<span class="px-1.5 py-0.5 rounded bg-green-950/40 border border-green-900/50 text-green-400">♪ ${folder.themes}</span>`
+            : '<span class="px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-500">no themes</span>');
+    }
+    return badges.join('');
 }
 
 async function browseServerFolder(folder) {
     const list = document.getElementById('folderBrowserList');
+    hideFolderSuggestions();
     try {
         const res = await callBackend('browse_media_folders', [folder], '/api/browse_folders', { folder: folder });
         if (!res.success) {
@@ -455,23 +476,94 @@ async function browseServerFolder(folder) {
         }
         folderBrowserCurrent = res.path;
         folderBrowserParent = res.parent;
-        document.getElementById('folderBrowserPath').innerText = res.path;
-        document.getElementById('folderBrowserPath').title = res.path;
+        document.getElementById('folderBrowserInput').value = res.path;
         document.getElementById('folderBrowserUp').disabled = !res.parent;
 
+        const crumbs = document.getElementById('folderBrowserBreadcrumb');
+        crumbs.innerHTML = res.breadcrumb.map((crumb, i) => `${i > 0 ? '<span class="text-neutral-600">›</span>' : ''}
+            <button data-idx="${i}" class="folder-crumb px-1 py-0.5 rounded hover:bg-neutral-700/60 hover:text-white truncate max-w-[200px] ${i === res.breadcrumb.length - 1 ? 'text-neutral-200 font-semibold' : ''}">${escapeHtml(crumb.name)}</button>`).join('');
+        crumbs.querySelectorAll('.folder-crumb').forEach(btn => {
+            btn.addEventListener('click', () => browseServerFolder(res.breadcrumb[parseInt(btn.dataset.idx)].path));
+        });
+
         list.innerHTML = res.folders.length === 0
-            ? '<p class="text-xs text-neutral-500 text-center py-6">No subfolders here.</p>'
-            : res.folders.map((name, i) => `
-                <button data-idx="${i}" class="folder-browser-item w-full text-left px-2.5 py-1.5 rounded text-xs text-neutral-300 hover:bg-neutral-700/60 hover:text-white truncate">
-                    📁 ${escapeHtml(name)}
+            ? '<p class="text-xs text-neutral-500 text-center py-6">No subfolders here. Use "Select this folder" to pick it.</p>'
+            : res.folders.map((folder, i) => `
+                <button data-idx="${i}" class="folder-browser-item w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded text-xs text-neutral-300 hover:bg-neutral-700/60 hover:text-white">
+                    <span class="flex-shrink-0">📁</span>
+                    <span class="truncate min-w-0 flex-1">${escapeHtml(folder.name)}</span>
+                    <span class="flex items-center gap-1 flex-shrink-0 text-[10px]">${folderBadges(folder)}</span>
                 </button>`).join('');
         list.querySelectorAll('.folder-browser-item').forEach(btn => {
-            const name = res.folders[parseInt(btn.dataset.idx)];
-            btn.addEventListener('click', () => browseServerFolder(res.path.replace(/[\\/]+$/, '') + '/' + name));
+            btn.addEventListener('click', () => browseServerFolder(res.folders[parseInt(btn.dataset.idx)].path));
         });
+        list.scrollTop = 0;
     } catch (err) {
         console.error("Folder browser error:", err);
         showToast("Could not reach the server.", "error");
+    }
+}
+
+function hideFolderSuggestions() {
+    clearTimeout(folderSuggestTimer);
+    folderSuggestIndex = -1;
+    document.getElementById('folderBrowserSuggestions').classList.add('hidden');
+}
+
+function onFolderPathInput() {
+    clearTimeout(folderSuggestTimer);
+    folderSuggestTimer = setTimeout(async () => {
+        const text = document.getElementById('folderBrowserInput').value;
+        const res = await callBackend('suggest_media_folders', [text], '/api/suggest_folders', { text: text });
+        const box = document.getElementById('folderBrowserSuggestions');
+        const suggestions = (res && res.suggestions) || [];
+        folderSuggestIndex = -1;
+        if (suggestions.length === 0) {
+            box.classList.add('hidden');
+            return;
+        }
+        box.innerHTML = suggestions.map((path, i) => `
+            <button data-idx="${i}" data-path="${escapeHtml(path)}" class="folder-suggestion w-full flex items-baseline gap-2 text-left px-3 py-1.5 text-xs hover:bg-neutral-700/60 min-w-0">
+                <span class="text-neutral-200 truncate flex-shrink-0 max-w-[65%]">📁${escapeHtml(path.split(/[\\/]/).filter(Boolean).pop() || path)}</span>
+                <span class="text-[10px] font-mono text-neutral-500 truncate min-w-0" style="direction: rtl; text-align: left;">${escapeHtml(path.replace(/[\\/][^\\/]*$/, '') || '/')}</span>
+            </button>`).join('');
+        box.querySelectorAll('.folder-suggestion').forEach(btn => {
+            btn.addEventListener('mousedown', (event) => {
+                event.preventDefault();
+                browseServerFolder(suggestions[parseInt(btn.dataset.idx)]);
+            });
+        });
+        box.classList.remove('hidden');
+    }, 200);
+}
+
+function onFolderPathKey(event) {
+    const box = document.getElementById('folderBrowserSuggestions');
+    const items = [...box.querySelectorAll('.folder-suggestion')];
+    const open = !box.classList.contains('hidden') && items.length > 0;
+
+    if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        folderSuggestIndex = (folderSuggestIndex + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items.forEach((item, i) => item.classList.toggle('bg-neutral-700/60', i === folderSuggestIndex));
+        return;
+    }
+    if (event.key === 'Tab' && open) {
+        // Completes the path with the highlighted (or first) suggestion and keeps typing from there
+        event.preventDefault();
+        const pick = items[Math.max(folderSuggestIndex, 0)].dataset.path;
+        document.getElementById('folderBrowserInput').value = pick + '/';
+        onFolderPathInput();
+        return;
+    }
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const picked = open && folderSuggestIndex >= 0 ? items[folderSuggestIndex].dataset.path : event.target.value.trim();
+        browseServerFolder(picked);
+        return;
+    }
+    if (event.key === 'Escape') {
+        if (open) hideFolderSuggestions(); else closeFolderBrowser();
     }
 }
 
