@@ -1,11 +1,138 @@
 import os
+import re
+import threading
+import time
 import requests
 
 from core.files import clean_search_name
 
-def fetch_jellyfin_data(folder_name, jellyfin_url, api_key):
+LIBRARY_INDEX_TTL = 600  # seconds before the series/movie list is fetched again
+
+_index_lock = threading.Lock()
+_index_cache = {}  # (url, api_key) -> (timestamp, index)
+
+
+def _path_parts(path):
+    """Folder components of a path, lower-cased, accepting both / and \\ separators"""
+    return [p.casefold() for p in re.split(r'[\\/]+', str(path).strip()) if p]
+
+
+def _item_result(item, clean_url):
+    genres_list = item.get("Genres", [])
+    return {
+        "success": True,
+        "official_name": item.get("Name"),
+        "series_id": item.get("Id"),
+        "image_url": f"{clean_url}/Items/{item.get('Id')}/Images/Primary?format=jpg",
+        "genres": ", ".join(genres_list) if genres_list else ""
+    }
+
+
+def _build_library_index(items):
+    """Maps each media folder of the Jellyfin library to its item. Series point to their folder; movies to the folder holding the file"""
+    entries = []
+    movie_dirs = {}
+
+    for item in items:
+        path = item.get("Path")
+        if not path:
+            continue
+        if item.get("Type") == "Movie":
+            folder = re.split(r'[\\/]+', path.rstrip('\\/'))[:-1]
+            folder_path = "/".join(folder)
+            movie_dirs[folder_path.casefold()] = movie_dirs.get(folder_path.casefold(), 0) + 1
+        else:
+            folder_path = path
+        entries.append((folder_path, item))
+
+    index = []
+    for folder_path, item in entries:
+        # Movies stored loose in a shared folder have no folder of their own to match
+        if item.get("Type") == "Movie" and movie_dirs.get(folder_path.casefold(), 0) > 1:
+            continue
+        parts = _path_parts(folder_path)
+        if parts:
+            index.append((parts, folder_path, item))
+    return index
+
+
+def get_library_index(jellyfin_url, api_key, force_refresh=False):
+    """Series and movies of the Jellyfin library with their paths, cached for LIBRARY_INDEX_TTL seconds. Empty list when unreachable"""
     clean_url = jellyfin_url.rstrip('/')
-    headers = {"X-Emby-Token": api_key} 
+    key = (clean_url, api_key)
+
+    with _index_lock:
+        cached = _index_cache.get(key)
+        if cached and not force_refresh and time.time() - cached[0] < LIBRARY_INDEX_TTL:
+            return cached[1]
+
+        try:
+            res = requests.get(
+                f"{clean_url}/Items",
+                headers={"X-Emby-Token": api_key},
+                params={"IncludeItemTypes": "Series,Movie", "Recursive": "true", "Fields": "Path,Genres"},
+                timeout=20
+            )
+            if res.status_code != 200:
+                print(f"[JELLYFIN] ⚠️ Could not load the library index (status {res.status_code}). Using name search.")
+                return []
+            index = _build_library_index(res.json().get("Items", []))
+        except Exception as e:
+            print(f"[JELLYFIN] ⚠️ Could not load the library index: {e}. Using name search.")
+            return []
+
+        _index_cache[key] = (time.time(), index)
+        print(f"[JELLYFIN] 📚 Library index loaded: {len(index)} media folder(s).")
+        return index
+
+
+def match_media_folder(index, folder):
+    """Item whose media folder is `folder` (a full path or just the folder name). Compares from the end of the path, so
+    D:\\Medias\\Animes\\X and /data/Animes/X match each other. Returns None when nothing or more than one item fits"""
+    target = _path_parts(folder)
+    if not target:
+        return None
+
+    candidates = [entry for entry in index if entry[0][-1] == target[-1]]
+    depth = 2
+    while len(candidates) > 1 and depth <= len(target):
+        candidates = [entry for entry in candidates if entry[0][-depth:] == target[-depth:]]
+        depth += 1
+
+    return candidates[0][2] if len(candidates) == 1 else None
+
+
+def find_jellyfin_item(item_id, jellyfin_url, api_key):
+    """Looks up one item by id. Seasons and episodes resolve to their series"""
+    clean_url = jellyfin_url.rstrip('/')
+    headers = {"X-Emby-Token": api_key}
+    try:
+        res = requests.get(f"{clean_url}/Items", headers=headers,
+                           params={"Ids": item_id, "Recursive": "true", "Fields": "Path,Genres"}, timeout=10)
+        items = res.json().get("Items", []) if res.status_code == 200 else []
+
+        # Jellyfin ignores an invalid Ids filter and returns other items, so only the requested id is accepted
+        wanted = str(item_id).replace("-", "").casefold()
+        item = next((i for i in items if str(i.get("Id", "")).replace("-", "").casefold() == wanted), None)
+        if not item:
+            return None
+        if item.get("Type") in ("Season", "Episode") and item.get("SeriesId"):
+            return find_jellyfin_item(item["SeriesId"], jellyfin_url, api_key)
+        return item if item.get("Type") in ("Series", "Movie") else None
+    except Exception as e:
+        print(f"[JELLYFIN] ❌ Error looking up item {item_id}: {e}")
+        return None
+
+
+def fetch_jellyfin_data(folder_name, jellyfin_url, api_key, folder_path=None):
+    clean_url = jellyfin_url.rstrip('/')
+    headers = {"X-Emby-Token": api_key}
+
+    # STEP 0: Exact match by folder path against the library index
+    item = match_media_folder(get_library_index(jellyfin_url, api_key), folder_path or folder_name)
+    if item:
+        print(f"[JELLYFIN] ✅ Matched by folder path: {item.get('Name')}")
+        return _item_result(item, clean_url)
 
     def try_search(term):
         params = {

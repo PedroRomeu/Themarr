@@ -13,7 +13,7 @@ from mutagen.mp3 import MP3
 from core.config import load_config, save_config, APP_ROOT_DIR
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
-from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image
+from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name
 
 global_state = {
@@ -47,7 +47,7 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_fi
     
     if jelly_url and jelly_api:
         print("[AUTOMATION] 🌐 Querying Jellyfin for additional metadata...")
-        search_result = fetch_jellyfin_data(anime_folder_name, jelly_url, jelly_api)
+        search_result = fetch_jellyfin_data(anime_folder_name, jelly_url, jelly_api, folder_path=anime_folder_path)
         
         if search_result["success"]:
             final_genre = search_result["genres"]
@@ -212,6 +212,15 @@ def _theme_folder_tracks(theme_folder, location_type, error_label):
                 tracks.append(_track_entry(os.path.join(theme_folder, file), file, location_type, f"{error_label} {file}"))
     return tracks
 
+def _list_season_folders(folder):
+    seasons = []
+    for item in os.listdir(folder):
+        if os.path.isdir(os.path.join(folder, item)):
+            item_lower = item.lower()
+            if "season" in item_lower or "temporada" in item_lower or "specials" in item_lower:
+                seasons.append(item)
+    return sorted(seasons)
+
 def _powershell_dialog(script):
     res = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
@@ -242,13 +251,7 @@ class Api:
                 folder = _powershell_dialog(cmd)
 
             if folder and os.path.exists(folder):
-                for item in os.listdir(folder):
-                    item_path = os.path.join(folder, item)
-                    if os.path.isdir(item_path):
-                        item_lower = item.lower()
-                        if "season" in item_lower or "temporada" in item_lower or "specials" in item_lower:
-                            seasons.append(item)
-                seasons.sort()
+                seasons = _list_season_folders(folder)
 
         except Exception as e:
             print(f"[API] Error selecting folder: {e}")
@@ -259,6 +262,25 @@ class Api:
             "seasons": seasons
         }
         
+    def resolve_jellyfin_item(self, item_id):
+        """Media folder of a Jellyfin item, in the same shape as select_folder"""
+        config = load_config()
+        jelly_url, jelly_api = config.get("jelly_url"), config.get("jelly_api")
+        if not (config.get("jelly_check") and jelly_url and jelly_api):
+            return {"success": False, "message": "Jellyfin is not configured in Settings."}
+
+        item = find_jellyfin_item(str(item_id).strip(), jelly_url, jelly_api)
+        if not item or not item.get("Path"):
+            return {"success": False, "message": "This item was not found on Jellyfin."}
+
+        folder = os.path.dirname(item["Path"]) if item.get("Type") == "Movie" else item["Path"]
+        if not os.path.isdir(folder):
+            print(f"[JELLYFIN] ⚠️ '{item.get('Name')}' lives at '{folder}', which Themarr cannot see.")
+            return {"success": False, "message": f"Folder not visible from Themarr: {folder}"}
+
+        print(f"[JELLYFIN] 🔗 Opened from Jellyfin: {item.get('Name')} -> {folder}")
+        return {"success": True, "path": folder, "seasons": _list_season_folders(folder), "name": item.get("Name")}
+
     def _resolve_smart_folders(self, folder, batch_mode):
         if not folder: 
             return folder
@@ -1094,7 +1116,7 @@ class Api:
             print(f"[ASSISTANT] Error scanning missing themes: {e}")
             return {"success": False, "message": str(e)}
 
-    def get_assistant_search_query(self, folder_name):
+    def get_assistant_search_query(self, folder_name, folder_path=None):
         try:
             config = self.get_settings()
             jelly_url = config.get("jelly_url")
@@ -1108,7 +1130,7 @@ class Api:
             clean_fallback = clean_search_name(folder_name, remove_year=True)
             
             if jelly_url and jelly_api and config.get("jelly_check"):
-                search_result = fetch_jellyfin_data(folder_name, jelly_url, jelly_api)
+                search_result = fetch_jellyfin_data(folder_name, jelly_url, jelly_api, folder_path=folder_path)
                 if search_result.get("success"):
                     official_name = search_result.get("official_name")
                     series_id = search_result.get("series_id")
@@ -1133,9 +1155,9 @@ class Api:
             print(f"[ASSISTANT] Error getting search query for {folder_name}: {e}")
             return {"success": False, "message": str(e)}
 
-    def get_media_theme_suggestions(self, folder_name):
+    def get_media_theme_suggestions(self, folder_name, folder_path=None):
         try:
-            meta = self.get_assistant_search_query(folder_name)
+            meta = self.get_assistant_search_query(folder_name, folder_path)
             if not meta.get("success"):
                 return {"success": False, "message": meta.get("message")}
                 

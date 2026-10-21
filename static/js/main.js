@@ -393,23 +393,45 @@ function selectFolder() {
 
     if(window.pywebview) {
         window.pywebview.api.select_folder().then(response => {
-            if(response.success) {
-                let returnedPath = response.path;
-                document.getElementById('folderPath').innerText = returnedPath;
-                loadFolderCheckboxes(returnedPath);
-                globalDestinationOptions = ['Main Theme'];
-                
-                let returnedSeasons = response.seasons || [];
-                if(returnedSeasons.length === 0) {
-                    let folderName = returnedPath.split('\\').pop().split('/').pop();
-                    globalDestinationOptions.push(`Season 01. ${folderName}`);
-                } else {
-                    globalDestinationOptions.push(...returnedSeasons);
-                }
-                updateMainDropdown();
-            }
+            if(response.success) applySelectedFolder(response);
         });
     } else { alert("Connect to Python first."); }
+}
+
+// Applies a folder returned by select_folder or resolve_jellyfin_item: { path, seasons }
+function applySelectedFolder(response) {
+    let returnedPath = response.path;
+    document.getElementById('folderPath').innerText = returnedPath;
+    loadFolderCheckboxes(returnedPath);
+    globalDestinationOptions = ['Main Theme'];
+
+    let returnedSeasons = response.seasons || [];
+    if(returnedSeasons.length === 0) {
+        let folderName = returnedPath.split('\\').pop().split('/').pop();
+        globalDestinationOptions.push(`Season 01. ${folderName}`);
+    } else {
+        globalDestinationOptions.push(...returnedSeasons);
+    }
+    updateMainDropdown();
+}
+
+// Links from Jellyfin open Themarr as /?item=<Jellyfin item id> with that media folder already selected
+async function openFromJellyfinLink() {
+    const itemId = new URLSearchParams(window.location.search).get('item');
+    if (!itemId) return;
+
+    try {
+        const res = await callBackend('resolve_jellyfin_item', [itemId], '/api/jellyfin/resolve_item', { item_id: itemId });
+        if (res.success) {
+            applySelectedFolder(res);
+            showToast(`Opened from Jellyfin: ${res.name}`, "success");
+        } else {
+            showToast(res.message, "error");
+        }
+    } catch (err) {
+        console.error("Jellyfin link error:", err);
+        showToast("Could not open the media sent by Jellyfin.", "error");
+    }
 }
 
 function updateMainDropdown() {
@@ -860,6 +882,7 @@ async function loadSettings() {
 
 window.addEventListener('pywebviewready', function() {
     loadSettings();
+    openFromJellyfinLink();
 });
 
 async function saveAutoSettings() {
@@ -1952,7 +1975,7 @@ async function openAssistantModal() {
             `).join('');
 
         assistantMediaList.forEach((media, idx) => {
-            fetchSuggestionsForMediaRow(media.folder_name, idx);
+            fetchSuggestionsForMediaRow(media.folder_name, idx, media.folder_path);
         });
 
     } catch (err) {
@@ -1967,10 +1990,10 @@ function closeAssistantModal() {
     document.getElementById('assistantModal').classList.add('hidden');
 }
 
-async function fetchSuggestionsForMediaRow(folderName, idx) {
+async function fetchSuggestionsForMediaRow(folderName, idx, folderPath) {
     try {
-        const res = await callBackend('get_media_theme_suggestions', [folderName], '/api/library/assistant/suggestions',
-            { folder_name: folderName });
+        const res = await callBackend('get_media_theme_suggestions', [folderName, folderPath], '/api/library/assistant/suggestions',
+            { folder_name: folderName, folder_path: folderPath });
 
         const suggContainer = document.getElementById(`assistant-sugg-container-${idx}`);
         const metaEl = document.getElementById(`assistant-meta-${idx}`);

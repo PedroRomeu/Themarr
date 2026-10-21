@@ -37,6 +37,11 @@ def register_routes(app, api_system):
         data = request.get_json(force=True, silent=True) or {}
         return jsonify(api_system.get_subfolders(data.get('folder', '')))
 
+    @app.route('/api/jellyfin/resolve_item', methods=['POST'])
+    def api_flask_resolve_jellyfin_item():
+        data = request.get_json(force=True, silent=True) or {}
+        return jsonify(api_system.resolve_jellyfin_item(data.get('item_id', '')))
+
     @app.route('/api/status', methods=['GET'])
     def api_flask_status():
         return jsonify(api_system.get_status())
@@ -275,7 +280,7 @@ def register_routes(app, api_system):
         try:
             data = request.json or {}
             folder_name = data.get('folder_name', '')
-            result = api_system.get_media_theme_suggestions(folder_name)
+            result = api_system.get_media_theme_suggestions(folder_name, data.get('folder_path'))
             return jsonify(result)
         except Exception as e:
             print(f"[FLASK ERROR] Assistant suggestions failed: {e}")
