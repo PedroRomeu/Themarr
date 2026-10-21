@@ -21,3 +21,7 @@ versions/
 logo.ico/
 # Backups exportados pelo app
 backups/
+
+# Config e segredos do container
+config/
+.env

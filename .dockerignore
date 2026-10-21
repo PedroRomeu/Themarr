@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+bin/
+build/
+dist/
+versions/
+backups/
+sources_upload/
+config/
+.git/
+*.spec
+*.exe
+*.zip
+.env

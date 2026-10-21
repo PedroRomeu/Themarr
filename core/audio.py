@@ -6,7 +6,8 @@ import yt_dlp
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, error, TIT2, TALB, TCON
 
-from core.config import FFMPEG_PATH
+from core.config import FFMPEG_PATH, IS_WINDOWS, SERVER_MODE
+from core.safety import check_theme_write
 
 def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_enabled=True):
     """Builds the FFmpeg filter chain based on user choices"""
@@ -45,8 +46,11 @@ def build_audio_filter_chain(input_file, target_lufs, audio_effects, normalize_e
 
 
 def _run_ffmpeg(command):
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo = None
+    if IS_WINDOWS:
+        # Keeps the ffmpeg console window hidden on Windows
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     subprocess.run(command, check=True, startupinfo=startupinfo)
 
 
@@ -109,6 +113,7 @@ def normalize_and_save(input_file, full_output_path, target_lufs, audio_effects=
         file_name = file_name.replace('  ', ' ')
 
     full_output_path = os.path.join(dir_name, file_name)
+    check_theme_write(full_output_path)
 
     print(f"\n[AUDIO] Enhancing & Normalizing -> {full_output_path}")
 
@@ -160,7 +165,10 @@ def normalize_audio_ffmpeg(mp3_path, target_lufs, audio_effects=None, normalize_
     to_sec = parse_time_to_seconds(audio_effects.get("end_time"))
 
     dir_name, file_name = os.path.split(mp3_path)
-    temp_output = os.path.join(dir_name, f"temp_proc_{file_name}")
+    check_theme_write(mp3_path, "overwrite")
+    # On the server the scratch file never lands in a media folder
+    temp_dir = tempfile.gettempdir() if SERVER_MODE else dir_name
+    temp_output = os.path.join(temp_dir, f"temp_proc_{file_name}")
 
     input_file = mp3_path
     temp_trimmed_file = None
@@ -209,7 +217,7 @@ def parse_time_to_seconds(time_str):
 def youtube_options():
     """Base yt-dlp options for YouTube: JS runtime for the n/sig challenge (needs yt-dlp-ejs) and fallback player clients"""
     js_runtimes = {'node': {}}
-    bundled_deno = os.path.join(os.path.dirname(FFMPEG_PATH), 'deno.exe')
+    bundled_deno = os.path.join(os.path.dirname(FFMPEG_PATH), 'deno.exe' if IS_WINDOWS else 'deno')
     if os.path.exists(bundled_deno):
         js_runtimes['deno'] = {'path': bundled_deno}
     elif shutil.which('deno'):
@@ -262,6 +270,7 @@ def download_music(youtube_url):
 
 def inject_mp3_metadata(mp3_path, image_path, title, album, genre):
     try:
+        check_theme_write(mp3_path, "tag")
         audio = MP3(mp3_path, ID3=ID3)
         
         if audio.tags is None:

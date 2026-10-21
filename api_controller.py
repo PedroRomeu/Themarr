@@ -2,7 +2,6 @@ import os
 import threading
 import re
 import tempfile
-import webview
 import shutil
 import requests
 import subprocess
@@ -10,7 +9,13 @@ import zipfile
 from datetime import datetime
 from mutagen.mp3 import MP3
 
-from core.config import load_config, save_config, APP_ROOT_DIR
+try:
+    import webview
+except ImportError:  # headless server: no native windows or dialogs
+    webview = None
+
+from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR
+from core.safety import check_theme_write, check_media_read, is_theme_file, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
 from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item
@@ -79,11 +84,11 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_fi
     if only_file:
         mp3_paths = [only_file]
     else:
-        mp3_paths = [
+        mp3_paths = theme_files_only([
             os.path.join(root, file)
             for root, _, files in os.walk(anime_folder_path)
             for file in files if file.lower().endswith('.mp3')
-        ]
+        ])
 
     for full_mp3_path in mp3_paths:
         root = os.path.dirname(full_mp3_path)
@@ -135,6 +140,31 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_fi
                 os.remove(s_img)
             except Exception:
                 pass
+
+IMPORT_PREFIX = "themarr_import_"
+UPLOAD_PREFIX = "themarr_upload_"
+
+def _is_import_session(path):
+    """True only for a temp folder created by analyze_backup"""
+    if not path or not os.path.isdir(path):
+        return False
+    real = os.path.realpath(path)
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    return os.path.dirname(real) == temp_root and os.path.basename(real).startswith(IMPORT_PREFIX)
+
+def _is_uploaded_backup(path):
+    """True only for a zip saved by the upload route"""
+    if not path or not os.path.isfile(path):
+        return False
+    real = os.path.realpath(path)
+    return (os.path.dirname(real) == os.path.realpath(tempfile.gettempdir())
+            and os.path.basename(real).startswith(UPLOAD_PREFIX) and real.lower().endswith('.zip'))
+
+def save_uploaded_backup(file_storage):
+    fd, path = tempfile.mkstemp(prefix=UPLOAD_PREFIX, suffix='.zip')
+    os.close(fd)
+    file_storage.save(path)
+    return path
 
 def _start_background(target, *args):
     t = threading.Thread(target=target, args=args)
@@ -235,7 +265,9 @@ class Api:
         folder = ""
         seasons = []
         try:
-            if len(webview.windows) > 0:
+            if SERVER_MODE:
+                return {"success": False, "path": "", "seasons": [], "message": "Use the folder browser on the server."}
+            if webview and len(webview.windows) > 0:
                 active_window = next(iter(webview.windows))
                 result = active_window.create_file_dialog(webview.FOLDER_DIALOG)
                 if result:
@@ -262,6 +294,28 @@ class Api:
             "seasons": seasons
         }
         
+    def browse_media_folders(self, folder=None):
+        """Server folder browser: subfolders of `folder`, never above MEDIA_ROOT"""
+        root = MEDIA_ROOT or os.path.abspath(os.sep)
+        current = os.path.realpath(folder) if folder else root
+        check_media_read(current)
+        if not os.path.isdir(current):
+            current = root
+        try:
+            folders = sorted((f for f in os.listdir(current) if os.path.isdir(os.path.join(current, f)) and not f.startswith('.')),
+                             key=str.lower)
+        except OSError as e:
+            return {"success": False, "message": str(e)}
+        parent = os.path.dirname(current) if current != root else None
+        return {"success": True, "path": current, "parent": parent, "root": root, "folders": folders}
+
+    def select_server_folder(self, folder):
+        """Chosen in the folder browser; same response shape as select_folder"""
+        check_media_read(folder)
+        if not folder or not os.path.isdir(folder):
+            return {"success": False, "path": "", "seasons": [], "message": "Folder not found."}
+        return {"success": True, "path": os.path.realpath(folder), "seasons": _list_season_folders(folder)}
+
     def resolve_jellyfin_item(self, item_id):
         """Media folder of a Jellyfin item, in the same shape as select_folder"""
         config = load_config()
@@ -321,6 +375,9 @@ class Api:
                 return anime_folder
 
     def _auto_organize_single_season(self, anime_folder):
+        if SERVER_MODE:
+            print(f"[AUTO-ORGANIZE] Skipped on the server for '{os.path.basename(anime_folder)}': episode files are never moved.")
+            return
         try:
             items_in_folder = os.listdir(anime_folder)
             
@@ -371,6 +428,7 @@ class Api:
             print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {anime_folder}: {e}")
 
     def enhance_local_music(self, target_folder, scope, target_lufs, options=None, selected_folders=None):
+        check_media_read(target_folder or MEDIA_ROOT or '.')
         if options is None:
             options = {"normalize": True, "metadata": True, "organize": True}
             
@@ -434,11 +492,11 @@ class Api:
                 if not options.get("normalize", True) and not options.get("metadata", True) and not options.get("audio_fx", False):
                     continue
 
-                mp3s_in_folder = [
+                mp3s_in_folder = theme_files_only([
                     os.path.join(root, file)
                     for root, _, files in os.walk(anime_folder)
                     for file in files if file.lower().endswith('.mp3')
-                ]
+                ])
                 
                 if not mp3s_in_folder:
                     continue 
@@ -474,6 +532,7 @@ class Api:
             global_state["is_processing"] = False
         
     def delete_music_folder(self, root_folder, scope, selected_folders=None):
+        check_media_read(root_folder or MEDIA_ROOT or '.')
 
         if not root_folder or not os.path.exists(root_folder):
             return {"status": "error", "message": "Invalid or missing directory."}
@@ -511,8 +570,9 @@ class Api:
                 
                 for root, subfolders, files in os.walk(target_folder):
                     for file in files:
-                        if file.lower().endswith('.mp3'):
-                            full_path = os.path.join(root, file)
+                        full_path = os.path.join(root, file)
+                        if file.lower().endswith('.mp3') and (not SERVER_MODE or is_theme_file(full_path)):
+                            check_theme_write(full_path, "delete")
                             os.remove(full_path)
                             print(f"[CLEANUP] 🗑️ Removed: {file}")
                             deleted_count += 1
@@ -547,6 +607,7 @@ class Api:
         }
     
     def retry_single_item(self, index, music, root_anime_folder):
+        check_media_read(root_anime_folder or MEDIA_ROOT or '.')
         global_state["is_processing"] = True
         global_state["item_statuses"][index] = "processing"
         global_state["statusText"] = f"Retrying: {music.get('name')}..."
@@ -620,6 +681,7 @@ class Api:
                 global_state["is_processing"] = False
 
     def process_queue(self, music_list, root_anime_folder):
+        check_media_read(root_anime_folder or MEDIA_ROOT or '.')
         global_state["is_processing"] = True
         global_state["percentage"] = 0
         global_state["statusText"] = "Starting..."
@@ -766,6 +828,7 @@ class Api:
         return True
 
     def get_subfolders(self, folder_path):
+        check_media_read(folder_path or MEDIA_ROOT or '.')
         try:
             if not folder_path or not os.path.exists(folder_path):
                 return {"status": "error", "folders": [], "selected_anime": ""}
@@ -841,6 +904,7 @@ class Api:
         return get_streaming_url(url)
 
     def list_local_library(self, base_path, scope="all", selected_folders=None):
+        check_media_read(base_path or MEDIA_ROOT or '.')
         """
         Scan media folders and return a structured list of available anime and their associated theme music tracks.
         Detects intelligently if the inserted path is the media root or a specific anime folder.
@@ -926,6 +990,8 @@ class Api:
                     print(f"[LIBRARY] Rename aborted: '{new_name}' already exists in this folder.")
                     return {"success": False, "message": f"A track named '{new_name}' already exists in this folder."}
 
+                check_theme_write(file_path, "rename")
+                check_theme_write(new_file_path, "rename")
                 os.rename(file_path, new_file_path)
                 file_path = new_file_path  # Mantém a referência atualizada para a injeção de tags
                 print(f"[LIBRARY] Rename completed successfully!")
@@ -946,8 +1012,9 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def export_media_backup(self, base_path, scope, selected_folders=None):
+        check_media_read(base_path or MEDIA_ROOT or '.')
         try:
-            backup_dir = os.path.join(APP_ROOT_DIR, "backups")
+            backup_dir = BACKUP_DIR
             os.makedirs(backup_dir, exist_ok=True)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -989,10 +1056,12 @@ class Api:
     def select_backup_file(self):
         file_path = ""
         try:
-            if len(webview.windows) > 0:
+            if SERVER_MODE:
+                return {"success": False, "file_path": ""}
+            if webview and len(webview.windows) > 0:
                 active_window = next(iter(webview.windows))
                 result = active_window.create_file_dialog(
-                    webview.OPEN_DIALOG, 
+                    webview.OPEN_DIALOG,  
                     file_types=('Zip files (*.zip)', 'All files (*.*)')
                 )
                 if result:
@@ -1011,16 +1080,21 @@ class Api:
         return {"success": bool(file_path), "file_path": file_path}
 
     def analyze_backup(self, zip_path, base_path):
+        check_media_read(base_path or MEDIA_ROOT or '.')
         if not zip_path or not os.path.exists(zip_path):
             return {"success": False, "message": "Arquivo de backup inválido."}
+        if SERVER_MODE and not _is_uploaded_backup(zip_path):
+            return {"success": False, "message": "Upload the backup file through the browser."}
         if not base_path or not os.path.exists(base_path):
             return {"success": False, "message": "Diretório de mídias não configurado."}
             
         try:
-            temp_dir = tempfile.mkdtemp(prefix="themarr_import_")
+            temp_dir = tempfile.mkdtemp(prefix=IMPORT_PREFIX)
             
             with zipfile.ZipFile(zip_path, 'r') as zipf:
                 zipf.extractall(temp_dir)
+            if _is_uploaded_backup(zip_path):
+                os.remove(zip_path)
                 
             real_dest_root = _library_root(base_path)
             
@@ -1046,7 +1120,8 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def finalize_backup_import(self, temp_import_id, base_path, decision, missing_folders):
-        if not temp_import_id or not os.path.exists(temp_import_id):
+        # The id is a folder path sent back by the page and is deleted at the end: only accept our own import folders
+        if not _is_import_session(temp_import_id):
             return {"success": False, "message": "Sessão de importação expirou ou é inválida."}
             
         try:
@@ -1069,6 +1144,9 @@ class Api:
                     if decision in ("skip", "skip_missing"):
                         continue
                     elif decision == "create_all":
+                        if SERVER_MODE:
+                            print(f"[IMPORT] Skipping '{folder}': media folders are never created on the server.")
+                            continue
                         os.makedirs(dest_folder_path, exist_ok=True)
                         print(f"[IMPORT] Criando pasta de mídia ausente: '{folder}'")
                         
@@ -1078,7 +1156,13 @@ class Api:
                             src_file = os.path.join(root, file)
                             rel_subpath = os.path.relpath(src_file, temp_import_id)
                             dest_file = os.path.join(real_dest_root, rel_subpath)
-                            
+
+                            try:
+                                check_theme_write(dest_file, "import")
+                            except UnsafeMediaOperation as blocked:
+                                print(f"[IMPORT] {blocked}")
+                                continue
+
                             os.makedirs(os.path.dirname(dest_file), exist_ok=True)
                             
                             shutil.copy2(src_file, dest_file)
@@ -1096,6 +1180,7 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def scan_missing_themes(self, base_path, scope="all", selected_folders=None):
+        check_media_read(base_path or MEDIA_ROOT or '.')
         try:
             library_res = self.list_local_library(base_path, "all", None)
             if not library_res.get("success"):
@@ -1180,6 +1265,8 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def process_assistant_downloads(self, download_list, base_folder, options=None):
+        for item in download_list:
+            check_media_read(item.get("folder_path") or MEDIA_ROOT or '.')
         if global_state.get("is_processing", False):
             return {"success": False, "message": "Themarr is currently processing another task. Please wait."}
             

@@ -2,6 +2,9 @@ import os
 import re
 import shutil
 
+from core.config import SERVER_MODE
+from core.safety import check_theme_write
+
 def clean_search_name(folder_name, remove_year=False):
     if folder_name.lower().endswith('.mp3'):
         folder_name = os.path.splitext(folder_name)[0]
@@ -35,8 +38,11 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
             final_file = os.path.join(final_folder, custom_name)
             
         elif os.path.exists(loose_theme_file):
+            migrated_file = os.path.join(theme_music_folder, 'theme.mp3')
+            check_theme_write(loose_theme_file, "move")
+            check_theme_write(migrated_file, "move")
             os.makedirs(theme_music_folder, exist_ok=True)
-            shutil.move(loose_theme_file, os.path.join(theme_music_folder, 'theme.mp3'))
+            shutil.move(loose_theme_file, migrated_file)
             print("[SYSTEM] Migrated existing 'theme.mp3' to 'theme-music' folder to support multiple themes.")
             
             final_folder = theme_music_folder
@@ -48,10 +54,16 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
     else:
         raise ValueError("Theme type must be 'main' or 'season'.")
 
+    # Before makedirs: on the server only theme-music may be created, never a missing season folder
+    check_theme_write(final_file)
     os.makedirs(final_folder, exist_ok=True)
     return final_file
 
 def move_loose_episodes(root_folder, season_folder):
+    if SERVER_MODE:
+        print("[CLEANUP] Smart Organize skipped on the server: episode files are never moved.")
+        return
+
     media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
     temp_path = os.path.join(root_folder, season_folder)
     os.makedirs(temp_path, exist_ok=True)

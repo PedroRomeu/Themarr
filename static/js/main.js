@@ -68,6 +68,40 @@ setTimeout(() => {
     }
 }, 500);
 
+let SERVER_MODE = false;  // set by loadAppInfo(): headless server with login and folder browser
+
+// Server mode: an expired login sends the user back to the sign-in page
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    if (response.status === 401 && SERVER_MODE) {
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+    }
+    return response;
+};
+
+async function loadAppInfo() {
+    let info = {};
+    try {
+        info = await (await fetch('/api/app_info')).json();
+        SERVER_MODE = !!info.server_mode;
+    } catch (err) {
+        console.error("Could not load app info:", err);
+    }
+    if (!SERVER_MODE) return;
+
+    // Features that move episode files are unavailable on the server
+    ['enhanceOrganizeOption', 'libBulkOrganizeBtn', 'openBrowserOption'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    const organizeCheck = document.getElementById('chkOrganize');
+    if (organizeCheck) organizeCheck.checked = false;
+
+    document.getElementById('serverUserName').innerText = info.user || '';
+    document.getElementById('serverSessionBar').classList.remove('hidden');
+}
+
 const NO_FOLDER_TEXT = "No folder selected...";
 const START_BTN_IDLE_CLASS = "w-full bg-neutral-800 text-neutral-500 py-3 rounded-md font-bold text-sm mb-3 cursor-not-allowed border border-neutral-700 transition-colors";
 const START_BTN_READY_CLASS = "w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-md font-bold text-sm mb-3 cursor-pointer shadow-lg transition-colors";
@@ -391,11 +425,70 @@ function selectFolder() {
         updateQueueUI();
     }
 
+    if (SERVER_MODE) {
+        openFolderBrowser();
+        return;
+    }
+
     if(window.pywebview) {
         window.pywebview.api.select_folder().then(response => {
             if(response.success) applySelectedFolder(response);
         });
     } else { alert("Connect to Python first."); }
+}
+
+let folderBrowserCurrent = null;
+let folderBrowserParent = null;
+
+function openFolderBrowser() {
+    document.getElementById('folderBrowserModal').classList.remove('hidden');
+    const current = hasMediaFolder() ? getMediaFolder() : null;
+    browseServerFolder(current);
+}
+
+function closeFolderBrowser() {
+    document.getElementById('folderBrowserModal').classList.add('hidden');
+}
+
+async function browseServerFolder(folder) {
+    const list = document.getElementById('folderBrowserList');
+    try {
+        const res = await callBackend('browse_media_folders', [folder], '/api/browse_folders', { folder: folder });
+        if (!res.success) {
+            showToast(res.message || "Could not open this folder.", "error");
+            return;
+        }
+        folderBrowserCurrent = res.path;
+        folderBrowserParent = res.parent;
+        document.getElementById('folderBrowserPath').innerText = res.path;
+        document.getElementById('folderBrowserPath').title = res.path;
+        document.getElementById('folderBrowserUp').disabled = !res.parent;
+
+        list.innerHTML = res.folders.length === 0
+            ? '<p class="text-xs text-neutral-500 text-center py-6">No subfolders here.</p>'
+            : res.folders.map((name, i) => `
+                <button data-idx="${i}" class="folder-browser-item w-full text-left px-2.5 py-1.5 rounded text-xs text-neutral-300 hover:bg-neutral-700/60 hover:text-white truncate">
+                    📁 ${escapeHtml(name)}
+                </button>`).join('');
+        list.querySelectorAll('.folder-browser-item').forEach(btn => {
+            const name = res.folders[parseInt(btn.dataset.idx)];
+            btn.addEventListener('click', () => browseServerFolder(res.path.replace(/[\\/]+$/, '') + '/' + name));
+        });
+    } catch (err) {
+        console.error("Folder browser error:", err);
+        showToast("Could not reach the server.", "error");
+    }
+}
+
+async function chooseServerFolder() {
+    if (!folderBrowserCurrent) return;
+    const res = await callBackend('select_server_folder', [folderBrowserCurrent], '/api/select_server_folder', { folder: folderBrowserCurrent });
+    if (res.success) {
+        closeFolderBrowser();
+        applySelectedFolder(res);
+    } else {
+        showToast(res.message || "Could not select this folder.", "error");
+    }
 }
 
 // Applies a folder returned by select_folder or resolve_jellyfin_item: { path, seasons }
@@ -407,8 +500,11 @@ function applySelectedFolder(response) {
 
     let returnedSeasons = response.seasons || [];
     if(returnedSeasons.length === 0) {
-        let folderName = returnedPath.split('\\').pop().split('/').pop();
-        globalDestinationOptions.push(`Season 01. ${folderName}`);
+        // On the server a missing season folder is never created, so only Main Theme is offered
+        if (!SERVER_MODE) {
+            let folderName = returnedPath.split('\\').pop().split('/').pop();
+            globalDestinationOptions.push(`Season 01. ${folderName}`);
+        }
     } else {
         globalDestinationOptions.push(...returnedSeasons);
     }
@@ -880,7 +976,8 @@ async function loadSettings() {
     }
 }
 
-window.addEventListener('pywebviewready', function() {
+window.addEventListener('pywebviewready', async function() {
+    await loadAppInfo();
     loadSettings();
     openFromJellyfinLink();
 });
@@ -1381,7 +1478,7 @@ function renderLibrary(openMediaNames = []) {
                         ⚡ Apply All
                     </button>
                     ` : ''}
-                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
+                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="${SERVER_MODE ? 'hidden ' : ''}px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
                         📂 Organize Folder
                     </button>
                 </div>
@@ -1816,7 +1913,12 @@ async function exportLibraryBackup() {
         const response = await callBackend('export_media_backup', [baseFolder, libraryScope, selectedFolders], '/api/library/backup/export',
             { base_path: baseFolder, scope: libraryScope, selected_folders: selectedFolders });
         if (response.success) {
-            showToast(`Exported! Saved to backups/${response.filename}`, "success");
+            if (SERVER_MODE) {
+                window.location.href = `/api/library/backup/download?name=${encodeURIComponent(response.filename)}`;
+                showToast(`Exported! Downloading ${response.filename}`, "success");
+            } else {
+                showToast(`Exported! Saved to backups/${response.filename}`, "success");
+            }
         } else {
             showToast(`Export failed: ${response.message}`, "error");
         }
@@ -1833,7 +1935,9 @@ async function importLibraryBackup() {
     showToast("📂 Select backup ZIP file...", "info");
 
     try {
-        const selectRes = await callBackend('select_backup_file', [], '/api/library/backup/select_file');
+        const selectRes = SERVER_MODE
+            ? await uploadBackupFile()
+            : await callBackend('select_backup_file', [], '/api/library/backup/select_file');
 
         if (!selectRes || !selectRes.success || !selectRes.file_path) {
             showToast("Import cancelled or no file selected.", "info");
@@ -1873,6 +1977,28 @@ async function importLibraryBackup() {
         console.error("Backup import error:", err);
         showToast("Backup import analysis failed.", "error");
     }
+}
+
+// Server mode: lets the user pick a zip in the browser and uploads it; same shape as select_backup_file
+function uploadBackupFile() {
+    return new Promise(resolve => {
+        const input = document.getElementById('backupUploadInput');
+        input.value = '';
+        input.onchange = async () => {
+            const file = input.files[0];
+            if (!file) return resolve({ success: false });
+            showToast(`⏳ Uploading ${file.name}...`, "info");
+            const form = new FormData();
+            form.append('file', file);
+            try {
+                resolve(await (await fetch('/api/library/backup/upload', { method: 'POST', body: form })).json());
+            } catch (err) {
+                console.error("Backup upload error:", err);
+                resolve({ success: false });
+            }
+        };
+        input.click();
+    });
 }
 
 async function finalizeImportDecision(decision) {

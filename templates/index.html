@@ -173,12 +173,16 @@
                 <h2 class="text-lg font-bold">⚙️ Settings</h2>
                 <button onclick="toggleModal('settingsModal')" class="text-neutral-400 hover:text-white">&times;</button>
             </div>
+            <form id="serverSessionBar" method="post" action="/logout" class="hidden mb-4 flex items-center justify-between text-xs text-neutral-400 bg-neutral-900/60 border border-neutral-700 rounded px-3 py-2">
+                <span>Signed in as <strong id="serverUserName" class="text-neutral-200"></strong></span>
+                <button type="submit" class="text-red-400 hover:text-red-300 font-semibold">Sign out</button>
+            </form>
             <div class="space-y-3 text-sm">
                 <label class="flex items-center gap-2 cursor-pointer mb-2">
                     <input type="checkbox" id="jellyfinCheck" onchange="saveAutoSettings()" class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                     <span class="font-medium">Fetch Metadata from Jellyfin</span>
                 </label>
-                <label class="flex items-center gap-2 cursor-pointer mt-4 mb-2 pt-3 border-t border-neutral-700">
+                <label id="openBrowserOption" class="flex items-center gap-2 cursor-pointer mt-4 mb-2 pt-3 border-t border-neutral-700">
                     <input type="checkbox" id="openBrowserCheck" onchange="saveAutoSettings()" checked class="w-4 h-4 accent-blue-500 rounded bg-neutral-900 border-neutral-700">
                     <span class="font-medium text-neutral-300">Open browser automatically (Server Mode)</span>
                 </label>
@@ -291,7 +295,7 @@
                     </div>
                 </label>
                 
-                <label class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
+                <label id="enhanceOrganizeOption" class="flex items-start gap-3 cursor-pointer p-2 hover:bg-[#383838] rounded-lg transition group">
                     <input type="checkbox" id="chkOrganize" checked class="mt-1 w-4 h-4 accent-blue-500 cursor-pointer">
                     <div>
                         <span class="block font-medium text-gray-200 group-hover:text-white transition">Organize Folder Structure</span>
@@ -428,7 +432,7 @@
                     <button onclick="runBulkLibraryAction('metadata')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
                         📝 Embed All Metadata
                     </button>
-                    <button onclick="runBulkLibraryAction('structure')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
+                    <button id="libBulkOrganizeBtn" onclick="runBulkLibraryAction('structure')" class="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 rounded transition-colors font-medium">
                         📂 Organize Folders
                     </button>
                     <button onclick="exportLibraryBackup()" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 shadow-sm">
@@ -556,6 +560,27 @@
             </div>
         </div>
     </div>
+
+    <!-- Server mode: folder browser (replaces the native Browse dialog) -->
+    <div id="folderBrowserModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl p-5 w-full max-w-lg flex flex-col max-h-[80vh]">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-sm font-semibold text-neutral-200 uppercase tracking-wider">📂 Select Media Folder</h2>
+                <button onclick="closeFolderBrowser()" class="text-neutral-400 hover:text-white">&times;</button>
+            </div>
+            <div class="flex items-center gap-2 mb-3">
+                <button id="folderBrowserUp" onclick="browseServerFolder(folderBrowserParent)" class="px-2.5 py-1 bg-neutral-900 border border-neutral-700 rounded text-xs text-neutral-300 hover:text-white disabled:opacity-40">⬆ Up</button>
+                <span id="folderBrowserPath" class="text-xs text-neutral-400 truncate min-w-0 flex-1"></span>
+            </div>
+            <div id="folderBrowserList" class="flex-1 overflow-y-auto bg-neutral-900/60 border border-neutral-700 rounded p-1 space-y-0.5 min-h-[200px]"></div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="closeFolderBrowser()" class="px-4 py-2 bg-neutral-900 border border-neutral-700 text-neutral-300 rounded text-xs font-semibold">Cancel</button>
+                <button onclick="chooseServerFolder()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold">Select this folder</button>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" id="backupUploadInput" accept=".zip" class="hidden">
 
 </body>
 </html>

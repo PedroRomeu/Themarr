@@ -2,8 +2,12 @@ import sys
 import socket
 import logging
 import threading
-import webview
 from flask import Flask
+
+try:
+    import webview
+except ImportError:  # headless server (Docker): no desktop window
+    webview = None
 
 from api_controller import Api
 from core.logger import LogRedirector

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Themarr Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-[#1e1e1e] text-gray-200 min-h-screen flex items-center justify-center p-5">
+    <form method="post" action="{{ url_for('login') }}" class="bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl p-6 w-full max-w-sm space-y-4">
+        <div>
+            <h1 class="text-2xl font-semibold text-white tracking-wide">Themarr <span class="text-blue-500">Manager</span></h1>
+            <p class="text-xs text-neutral-400 mt-1">Sign in with your Jellyfin administrator account.</p>
+        </div>
+
+        {% if error %}
+        <p class="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded px-3 py-2">{{ error }}</p>
+        {% endif %}
+
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <input type="text" name="username" placeholder="Jellyfin username" autocomplete="username" required autofocus
+               class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password"
+               class="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-md text-sm font-semibold transition-colors">
+            Sign in
+        </button>
+    </form>
+</body>
+</html>

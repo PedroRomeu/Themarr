@@ -1,9 +1,101 @@
 import os
-from flask import render_template, jsonify, request, send_file
+import re
+import time
+from datetime import timedelta
 
-from core.config import load_config
+from flask import render_template, jsonify, request, send_file, session, redirect, url_for
+
+from core.config import load_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR
+from core.safety import UnsafeMediaOperation, check_media_read, check_theme_write, is_theme_file
+from api_controller import save_uploaded_backup
+
+PUBLIC_ENDPOINTS = {'login', 'static'}
+
+
+def _safe_next(target):
+    """Only same-site paths are accepted after login"""
+    return target if target and target.startswith('/') and not target.startswith('//') else '/'
+
+
+def register_auth(app):
+    """Server mode: every page and API call needs a signed-in Jellyfin administrator"""
+    from core.auth import get_secret_key, authenticate_jellyfin_admin
+
+    app.secret_key = get_secret_key()
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+        MAX_CONTENT_LENGTH=2 * 1024 * 1024 * 1024,  # backup uploads
+    )
+
+    @app.before_request
+    def require_login():
+        if request.endpoint in PUBLIC_ENDPOINTS or session.get('user'):
+            return None
+        if request.path.startswith('/api/'):
+            return jsonify({"success": False, "status": "error", "message": "Login required."}), 401
+        return redirect(url_for('login', next=request.full_path.rstrip('?')))
+
+    @app.route('/login', methods=['GET', 'POST'])
+    def login():
+        next_url = _safe_next(request.values.get('next', '/'))
+        if request.method == 'GET':
+            return render_template('login.html', error=None, next_url=next_url)
+
+        result = authenticate_jellyfin_admin(request.form.get('username', '').strip(), request.form.get('password', ''))
+        if not result["ok"]:
+            time.sleep(1)  # slows down password guessing
+            print(f"[AUTH] Failed login for '{request.form.get('username', '')}': {result['message']}")
+            return render_template('login.html', error=result["message"], next_url=next_url), 401
+
+        session.permanent = True
+        session['user'] = result["name"]
+        print(f"[AUTH] {result['name']} signed in.")
+        return redirect(next_url)
+
+    @app.route('/logout', methods=['POST'])
+    def logout():
+        session.clear()
+        return redirect(url_for('login'))
 
 def register_routes(app, api_system):
+    if SERVER_MODE:
+        register_auth(app)
+
+    @app.errorhandler(UnsafeMediaOperation)
+    def blocked_media_operation(error):
+        print(f"[SAFETY] 🛡️ {error}")
+        return jsonify({"success": False, "status": "error", "message": str(error)}), 403
+
+    @app.route('/api/app_info', methods=['GET'])
+    def api_flask_app_info():
+        return jsonify({"server_mode": SERVER_MODE, "media_root": MEDIA_ROOT, "user": session.get('user') if SERVER_MODE else None})
+
+    @app.route('/api/browse_folders', methods=['POST'])
+    def api_flask_browse_folders():
+        data = request.get_json(force=True, silent=True) or {}
+        return jsonify(api_system.browse_media_folders(data.get('folder')))
+
+    @app.route('/api/select_server_folder', methods=['POST'])
+    def api_flask_select_server_folder():
+        data = request.get_json(force=True, silent=True) or {}
+        return jsonify(api_system.select_server_folder(data.get('folder', '')))
+
+    @app.route('/api/library/backup/upload', methods=['POST'])
+    def api_flask_upload_backup():
+        upload = request.files.get('file')
+        if not upload or not upload.filename.lower().endswith('.zip'):
+            return jsonify({"success": False, "message": "Please choose a .zip backup file."})
+        return jsonify({"success": True, "file_path": save_uploaded_backup(upload)})
+
+    @app.route('/api/library/backup/download')
+    def api_flask_download_backup():
+        name = os.path.basename(request.args.get('name', ''))
+        path = os.path.join(BACKUP_DIR, name)
+        if not re.fullmatch(r'Themarr_Backup_\d{8}_\d{6}\.zip', name) or not os.path.isfile(path):
+            return "Backup not found", 404
+        return send_file(path, as_attachment=True, download_name=name)
 
     @app.route('/')
     def home():
@@ -150,6 +242,9 @@ def register_routes(app, api_system):
         file_path = request.args.get('path')
         if not file_path or not os.path.exists(file_path):
             return "File not found", 404
+        if SERVER_MODE and not is_theme_file(file_path):
+            return "Only theme files can be streamed", 403
+        check_media_read(file_path)
 
         return send_file(file_path, mimetype="audio/mpeg")
 
@@ -192,7 +287,8 @@ def register_routes(app, api_system):
         file_path = data.get('file_path', '')
         if not file_path or not os.path.exists(file_path):
             return jsonify({"success": False, "message": "File not found."})
-            
+
+        check_theme_write(file_path, "delete")
         try:
             os.remove(file_path)
             return jsonify({"success": True, "message": "File deleted."})
