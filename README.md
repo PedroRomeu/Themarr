@@ -28,22 +28,24 @@ Themarr is evolving from a standalone desktop application into a lightweight, de
 
 ## 🚀 Getting Started
 
-### Prerequisites
-* Python 3.10 or higher
-* FFmpeg binaries configured in the `bin/` directory
+### Desktop (Windows)
+Download the latest `Themarr_vX.Y.Z.zip` from [Releases](https://github.com/PedroRomeu/Themarr/releases), extract it and run `Themarr_Desktop.exe` (app window) or `Themarr_Server.exe` (tray icon + browser).
 
-### Installation
+### Server (Docker, next to Jellyfin)
+Themarr can run as a container on your Jellyfin server, with a login for Jellyfin administrators and a **Themarr** button on Jellyfin's media pages. Step-by-step guide: **[docs/SERVER.md](docs/SERVER.md)**.
 
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/YOUR-USERNAME/themarr.git](https://github.com/YOUR-USERNAME/themarr.git)
-   cd themarr
+```bash
+git clone https://github.com/PedroRomeu/Themarr.git && cd Themarr
+cp env.example .env   # set MEDIA_PATH and JELLYFIN_API_KEY
+docker compose up -d --build
+```
 
-2. Install the required dependencies:
-    pip install -r requirements.txt
-
-3. Run the application:
-    python main.py
+### From source
+Python 3.10+, with `ffmpeg.exe` in `bin/` on Windows (or `ffmpeg` on the PATH elsewhere):
+```bash
+pip install -r requirements-server.txt "yt-dlp[default]" pywebview pystray pillow
+python main.py
+```
 
 ## 🗺️ Roadmap
 

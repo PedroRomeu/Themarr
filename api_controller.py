@@ -1,4 +1,5 @@
 import os
+import json
 import threading
 import re
 import tempfile
@@ -14,11 +15,11 @@ try:
 except ImportError:  # headless server: no native windows or dialogs
     webview = None
 
-from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR
+from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, PATH_MAP, PUBLIC_URL, APP_ROOT_DIR
 from core.safety import check_theme_write, check_media_read, is_theme_file, is_season_folder_name, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
-from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder
+from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder, local_media_folder, install_jellyfin_buttons
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name, safe_move
 
 global_state = {
@@ -397,10 +398,11 @@ class Api:
         if not item or not item.get("Path"):
             return {"success": False, "message": "This item was not found on Jellyfin."}
 
-        folder = os.path.dirname(item["Path"]) if item.get("Type") == "Movie" else item["Path"]
-        if not os.path.isdir(folder):
-            print(f"[JELLYFIN] ⚠️ '{item.get('Name')}' lives at '{folder}', which Themarr cannot see.")
-            return {"success": False, "message": f"Folder not visible from Themarr: {folder}"}
+        jellyfin_folder = os.path.dirname(item["Path"]) if item.get("Type") == "Movie" else item["Path"]
+        folder = local_media_folder(jellyfin_folder, MEDIA_ROOT, PATH_MAP)
+        if not folder:
+            print(f"[JELLYFIN] ⚠️ '{item.get('Name')}' lives at '{jellyfin_folder}', which Themarr cannot see. Check the media volume or THEMARR_PATH_MAP.")
+            return {"success": False, "message": f"Folder not visible from Themarr: {jellyfin_folder}"}
 
         print(f"[JELLYFIN] 🔗 Opened from Jellyfin: {item.get('Name')} -> {folder}")
         return {"success": True, "path": folder, "seasons": _list_season_folders(folder), "name": item.get("Name")}
@@ -887,6 +889,19 @@ class Api:
         except Exception as e:
             return {"status": "error", "message": f"❌ Connection Error: {str(e)}"}
             
+    def jellyfin_buttons_script(self):
+        """jellyfin/themarr-buttons.js with THEMARR_URL_SETTING filled from THEMARR_PUBLIC_URL"""
+        with open(os.path.join(APP_ROOT_DIR, 'jellyfin', 'themarr-buttons.js'), 'r', encoding='utf-8') as f:
+            script = f.read()
+        return re.sub(r"const THEMARR_URL_SETTING = '[^']*';",
+                      lambda _: f"const THEMARR_URL_SETTING = {json.dumps(PUBLIC_URL)};", script, count=1)
+
+    def install_jellyfin_buttons(self):
+        config = load_config()
+        if not (config.get("jelly_url") and config.get("jelly_api")):
+            return {"success": False, "message": "Fill in the Jellyfin URL and API key first."}
+        return install_jellyfin_buttons(config["jelly_url"], config["jelly_api"], self.jellyfin_buttons_script())
+
     def get_settings(self):
         return load_config()
 

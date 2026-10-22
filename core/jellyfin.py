@@ -102,6 +102,50 @@ def match_media_folder(index, folder):
     return candidates[0][2] if len(candidates) == 1 else None
 
 
+def local_media_folder(jellyfin_path, media_root=None, path_map=()):
+    """Where Themarr sees a folder that Jellyfin reports, or None. Jellyfin and Themarr may mount the media at
+    different places (/media/tv/X on Jellyfin, /data/TV/X here), so after THEMARR_PATH_MAP and the path itself
+    it tries the last folders of the path under media_root, then a single <media_root>/<any library>/<name>"""
+    parts = [p for p in re.split(r'[\\/]+', str(jellyfin_path).strip()) if p]
+    if not parts:
+        return None
+
+    candidates = []
+    normalized = '/'.join(parts).casefold()
+    for src, dst in path_map:
+        src_norm = '/'.join(p for p in re.split(r'[\\/]+', src) if p).casefold()
+        if normalized == src_norm or normalized.startswith(src_norm + '/'):
+            rest = parts[len(src_norm.split('/')) if src_norm else 0:]
+            candidates.append(os.path.join(dst, *rest))
+            break
+    candidates.append(jellyfin_path)
+    if media_root:
+        # <library>/<media> and deeper tails first: a bare <media_root>/<name> is never a media folder
+        candidates += [os.path.join(media_root, *parts[-n:]) for n in range(len(parts), 1, -1)]
+
+    def usable(path):
+        if not os.path.isdir(path):
+            return False
+        if not media_root:
+            return True
+        real = os.path.realpath(path)
+        return real != media_root and os.path.commonpath([real, media_root]) == media_root
+
+    for candidate in candidates:
+        if usable(candidate):
+            return os.path.realpath(candidate)
+
+    if media_root:
+        try:
+            hits = [os.path.join(media_root, lib, parts[-1]) for lib in os.listdir(media_root)]
+        except OSError:
+            hits = []
+        hits = [h for h in hits if usable(h)]
+        if len(hits) == 1:
+            return os.path.realpath(hits[0])
+    return None
+
+
 def find_jellyfin_item(item_id, jellyfin_url, api_key):
     """Looks up one item by id. Seasons and episodes resolve to their series"""
     clean_url = jellyfin_url.rstrip('/')
@@ -251,3 +295,44 @@ def fetch_jellyfin_season_image(series_id, season_num, jellyfin_url, api_key):
     except Exception as e:
         print(f"[JELLYFIN] ❌ Error fetching season {season_num} data: {e}")
     return None
+
+
+JS_INJECTOR_ID = 'f5a34f7b2e8a4e6aa7223a216a81b374'  # n00bcodr/Jellyfin-JavaScript-Injector
+BUTTONS_SCRIPT_NAME = 'Themarr buttons'
+
+
+def install_jellyfin_buttons(jellyfin_url, api_key, script):
+    """Adds or updates the 'Themarr buttons' script in the JavaScript Injector plugin. Other scripts stay as they are"""
+    clean_url = jellyfin_url.rstrip('/')
+    headers = {"X-Emby-Token": api_key}
+    try:
+        res = requests.get(f"{clean_url}/Plugins", headers=headers, timeout=10)
+        if res.status_code != 200:
+            return {"success": False, "message": f"Jellyfin refused the plugin list (status {res.status_code}). The API key must be an admin key."}
+        plugin = next((p for p in res.json() if str(p.get("Id", "")).replace("-", "").lower() == JS_INJECTOR_ID), None)
+        if not plugin:
+            return {"success": False, "message": "JavaScript Injector is not installed on Jellyfin. Add it under Dashboard > Plugins first."}
+
+        config_url = f"{clean_url}/Plugins/{plugin['Id']}/Configuration"
+        res = requests.get(config_url, headers=headers, timeout=10)
+        if res.status_code != 200:
+            return {"success": False, "message": f"Could not read the JavaScript Injector settings (status {res.status_code})."}
+        config = res.json()
+        scripts = config.get("CustomJavaScripts") or []
+
+        entry = next((s for s in scripts if s.get("Name") == BUTTONS_SCRIPT_NAME), None)
+        updated = entry is not None
+        if not entry:
+            entry = {"Name": BUTTONS_SCRIPT_NAME}
+            scripts.append(entry)
+        # Only signed-in users load it; the script itself shows the buttons to administrators only
+        entry.update({"Script": script, "Enabled": True, "RequiresAuthentication": True})
+        config["CustomJavaScripts"] = scripts
+
+        res = requests.post(config_url, headers=headers, json=config, timeout=10)
+        if res.status_code not in (200, 204):
+            return {"success": False, "message": f"Jellyfin did not save the script (status {res.status_code})."}
+        print(f"[JELLYFIN] 🔘 '{BUTTONS_SCRIPT_NAME}' {'updated' if updated else 'installed'} in JavaScript Injector {plugin.get('Version', '')}.")
+        return {"success": True, "message": f"Buttons {'updated' if updated else 'installed'}. Reload the Jellyfin page (Ctrl+F5) to see them."}
+    except Exception as e:
+        return {"success": False, "message": f"Could not reach Jellyfin: {e}"}

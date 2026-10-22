@@ -139,6 +139,15 @@ def register_routes(app, api_system):
         data = request.get_json(force=True, silent=True) or {}
         return jsonify(api_system.resolve_jellyfin_item(data.get('item_id', '')))
 
+    @app.route('/api/jellyfin/install_buttons', methods=['POST'])
+    def api_flask_install_jellyfin_buttons():
+        return jsonify(api_system.install_jellyfin_buttons())
+
+    @app.route('/jellyfin/themarr-buttons.js')
+    def jellyfin_buttons_script():
+        # The script ready to paste into JavaScript Injector by hand
+        return api_system.jellyfin_buttons_script(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
     @app.route('/api/status', methods=['GET'])
     def api_flask_status():
         return jsonify(api_system.get_status())

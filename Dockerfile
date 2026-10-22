@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -U "yt-dlp[default]"
 COPY core/ core/
 COPY templates/ templates/
 COPY static/ static/
+COPY jellyfin/ jellyfin/
 COPY api_controller.py routes.py main.py Themarr_Docker.py ./
 RUN python -m compileall -q /app
 

@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import shutil
@@ -22,6 +23,20 @@ SERVER_MODE = os.environ.get('THEMARR_MODE', '').strip().lower() == 'server'
 MEDIA_ROOT = os.path.realpath(os.environ.get('THEMARR_MEDIA_ROOT', '/data')) if SERVER_MODE else None
 SERVER_HOST = os.environ.get('THEMARR_HOST', '0.0.0.0')
 SERVER_PORT = int(os.environ.get('THEMARR_PORT', '8686'))
+
+def _parse_path_map(text):
+    """THEMARR_PATH_MAP="/jellyfin/path=/themarr/path;...": where Themarr sees each folder Jellyfin reports. Longest prefix first"""
+    pairs = []
+    for entry in re.split(r'[;\n]+', text or ''):
+        src, sep, dst = entry.partition('=')
+        if sep and src.strip() and dst.strip():
+            pairs.append((src.strip(), dst.strip()))
+    return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
+
+PATH_MAP = _parse_path_map(os.environ.get('THEMARR_PATH_MAP'))
+
+# Address the Jellyfin buttons open. Empty: the same host Jellyfin was opened on, port SERVER_PORT
+PUBLIC_URL = os.environ.get('THEMARR_PUBLIC_URL', '').strip().rstrip('/')
 
 def _find_ffmpeg():
     override = os.environ.get('THEMARR_FFMPEG')

@@ -1,32 +1,43 @@
-# Example deployment next to a Jellyfin container. Adjust paths, user and network to your server.
+# Themarr next to a Jellyfin container. Everything server-specific lives in .env (copy .env.example).
+# Setup guide: docs/SERVER.md
 services:
   themarr:
     build: .
     container_name: themarr
     restart: unless-stopped
     # Same owner as the media files, so themes are never created as root
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     # Low priority under contention (default is 1024): Jellyfin and the others get about 4x more CPU.
     # Idle cores are still fully available to Themarr.
     cpu_shares: 256
     # If processing ever needs more, the kernel stops Themarr instead of Jellyfin
     mem_limit: 600m
     environment:
-      - TZ=America/Sao_Paulo
-      - JELLYFIN_URL=http://jellyfin:8096
+      - TZ=${TZ:-UTC}
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - THEMARR_PUBLIC_URL=${THEMARR_PUBLIC_URL:-}
+      - THEMARR_PATH_MAP=${THEMARR_PATH_MAP:-}
     volumes:
       - ./config:/config
-      # Must be the same folder Jellyfin sees as /data, so item paths match exactly.
-      # Start read-only (:ro) and switch to read-write only once everything is verified.
-      - /media/hd_ext/Medias:/data:ro
+      # Every library goes UNDER /data, one folder per library (/data/Animes, /data/TV, ...): Themarr only
+      # writes themes at /data/<library>/<media>. Start read-only (ro) and switch MEDIA_ACCESS to rw once verified.
+      # More libraries on other disks: add lines in docker-compose.override.yml (see docs/SERVER.md).
+      - ${MEDIA_PATH:?set MEDIA_PATH in .env}:/data:${MEDIA_ACCESS:-ro}
     ports:
-      # Bound to localhost by default: expose it through your VPN (e.g. tailscale serve), never publicly.
-      # Server-specific extras (home network IP, read-write media) belong in a docker-compose.override.yml.
-      - "${THEMARR_BIND:-127.0.0.1}:8686:8686"
+      # Bound to localhost by default. Set THEMARR_BIND to the server's LAN IP for the home network,
+      # or expose it through a VPN (e.g. tailscale serve). Never publish it to the internet.
+      - "${THEMARR_BIND:-127.0.0.1}:${THEMARR_HOST_PORT:-8686}:8686"
+    # Reaches a Jellyfin that runs outside Docker (or publishes its port) as http://host.docker.internal:8096
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - jellyfin_default
 
 networks:
+  # The Docker network of the Jellyfin container (see `docker network ls`), so http://jellyfin:8096 resolves.
+  # Jellyfin outside Docker: create any network once (`docker network create themarr`), set
+  # JELLYFIN_NETWORK=themarr and JELLYFIN_URL=http://host.docker.internal:8096.
   jellyfin_default:
+    name: ${JELLYFIN_NETWORK:-jellyfin_default}
     external: true

@@ -1,16 +1,18 @@
 // Themarr buttons for the Jellyfin 10.10 web UI, loaded through the JavaScript Injector plugin.
 //  - Series, season, episode and movie pages get a "Themarr" button that opens that media in Themarr
 //  - The header gets a button that opens Themarr
-// Only administrators see them. Themarr itself is reachable only inside the tailnet.
+// Only administrators see them. Themarr's Settings can install this script (it fills THEMARR_URL_SETTING
+// from THEMARR_PUBLIC_URL); to install it by hand, paste it into Dashboard > Plugins > JavaScript Injector.
 (function () {
     'use strict';
 
-    // Same network as the Jellyfin page: home network -> local address, anything else (tailnet, Funnel) -> tailnet address
-    const THEMARR_LAN_URL = 'http://192.168.100.211:8686';
-    const THEMARR_TAILNET_URL = 'https://servermain.tail94f464.ts.net:8686';
-    const host = window.location.hostname;
-    const onHomeNetwork = host === 'localhost' || /^(192\.168|10)\.\d+\.\d+$/.test(host) || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
-    const THEMARR_URL = onHomeNetwork ? THEMARR_LAN_URL : THEMARR_TAILNET_URL;
+    // Where Themarr is. Empty: the same host Jellyfin was opened on, port THEMARR_PORT, same http/https.
+    // That covers http://<server-ip>:8096 -> http://<server-ip>:8686 and a VPN name such as Tailscale serve.
+    // Set a full address (e.g. 'https://themarr.example.com') when Themarr sits behind a reverse proxy.
+    const THEMARR_URL_SETTING = '';
+    const THEMARR_PORT = 8686;
+    const THEMARR_URL = THEMARR_URL_SETTING.replace(/\/+$/, '')
+        || `${window.location.protocol}//${window.location.hostname}:${THEMARR_PORT}`;
     const ITEM_TYPES = ['Series', 'Season', 'Episode', 'Movie'];
     const DETAIL_BUTTON_CLASS = 'themarrDetailButton';
     const HEADER_BUTTON_ID = 'themarrHeaderButton';

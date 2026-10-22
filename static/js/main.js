@@ -92,6 +92,7 @@ async function loadAppInfo() {
 
     // Opening a local browser window makes no sense on a headless server
     document.getElementById('openBrowserOption').classList.add('hidden');
+    document.getElementById('jellyfinButtonsOption').classList.remove('hidden');
 
     document.getElementById('serverUserName').innerText = info.user || '';
     document.getElementById('serverSessionBar').classList.remove('hidden');
@@ -1023,6 +1024,22 @@ async function testConnection() {
         msgEl.innerText = "❌ Connection failed. Check if the URL is correct and the server is online.";
         msgEl.className = "text-sm font-bold text-center mt-2 transition-opacity block text-red-500";
         console.error("Connection test error:", error);
+    }
+}
+
+// Server mode: adds the Themarr buttons script to Jellyfin's JavaScript Injector plugin
+async function installJellyfinButtons() {
+    const msgEl = document.getElementById('installButtonsMsg');
+    msgEl.className = "text-sm font-bold text-center mt-2 block text-neutral-400";
+    msgEl.innerText = "Installing...";
+    try {
+        const res = await (await fetch('/api/jellyfin/install_buttons', { method: 'POST' })).json();
+        msgEl.innerText = res.message;
+        msgEl.className = `text-sm font-bold text-center mt-2 block ${res.success ? 'text-green-500' : 'text-red-500'}`;
+    } catch (error) {
+        msgEl.innerText = "❌ Could not reach Themarr.";
+        msgEl.className = "text-sm font-bold text-center mt-2 block text-red-500";
+        console.error("Install buttons error:", error);
     }
 }
 
