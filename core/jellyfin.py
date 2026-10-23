@@ -297,6 +297,35 @@ def fetch_jellyfin_season_image(series_id, season_num, jellyfin_url, api_key):
     return None
 
 
+def refresh_jellyfin_media(folder, jellyfin_url, api_key):
+    """Asks Jellyfin to rescan one media folder so new theme songs show up. Missing metadata only: customized
+    images and fields are kept. Falls back to a full library scan when the folder has no item of its own"""
+    clean_url = jellyfin_url.rstrip('/')
+    headers = {"X-Emby-Token": api_key}
+    try:
+        item = match_media_folder(get_library_index(jellyfin_url, api_key), folder)
+        if item:
+            res = requests.post(f"{clean_url}/Items/{item['Id']}/Refresh", headers=headers, timeout=10, params={
+                "Recursive": "true",
+                "MetadataRefreshMode": "Default",
+                "ImageRefreshMode": "Default",
+                "ReplaceAllMetadata": "false",
+                "ReplaceAllImages": "false"
+            })
+            target = f"'{item.get('Name')}'"
+        else:
+            res = requests.post(f"{clean_url}/Library/Refresh", headers=headers, timeout=10)
+            target = "the whole library (folder not matched to an item)"
+
+        if res.status_code in (200, 204):
+            print(f"[JELLYFIN] 🔄 Rescan requested for {target}.")
+            return True
+        print(f"[JELLYFIN] ⚠️ Jellyfin refused the rescan of {target} (status {res.status_code}). The API key must be an admin key.")
+    except Exception as e:
+        print(f"[JELLYFIN] ⚠️ Could not request a rescan: {e}")
+    return False
+
+
 JS_INJECTOR_ID = 'f5a34f7b2e8a4e6aa7223a216a81b374'  # n00bcodr/Jellyfin-JavaScript-Injector
 BUTTONS_SCRIPT_NAME = 'Themarr buttons'
 

@@ -19,7 +19,7 @@ from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKU
 from core.safety import check_theme_write, check_media_read, is_theme_file, is_season_folder_name, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
-from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder, local_media_folder, install_jellyfin_buttons
+from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder, local_media_folder, install_jellyfin_buttons, refresh_jellyfin_media
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name, safe_move
 
 global_state = {
@@ -189,6 +189,12 @@ def _artwork_config():
         config["jelly_url"] = ""
         config["jelly_api"] = ""
     return config
+
+def _refresh_jellyfin(folder):
+    """Rescans the media folder on Jellyfin after new themes were saved, when the integration is enabled"""
+    config = _artwork_config()
+    if folder and config.get("jelly_url") and config.get("jelly_api"):
+        refresh_jellyfin_media(folder, config["jelly_url"], config["jelly_api"])
 
 def _is_single_media_folder(base_path):
     """True when base_path is one media folder (has theme files or season folders) instead of the library root"""
@@ -729,7 +735,8 @@ class Api:
                 move_loose_episodes(root_anime_folder, destination)
                 
             process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
-            
+            _refresh_jellyfin(root_anime_folder)
+
             global_state["item_statuses"][index] = "completed"
             global_state["statusText"] = "Item processed successfully!"
             print(f"[SUCCESS] Single retry for {name} completed!")
@@ -853,6 +860,9 @@ class Api:
         global_state["percentageText"] = "99%"
 
         process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
+
+        if "completed" in global_state["item_statuses"]:
+            _refresh_jellyfin(root_anime_folder)
 
         # Process complete!
         global_state["percentage"] = 100
@@ -1406,6 +1416,7 @@ class Api:
 
                     if tags_enabled:
                         process_folder_artwork(folder_path, folder_name, _artwork_config())
+                    _refresh_jellyfin(folder_path)
                     print(f"[ASSISTANT SUCCESS] Successfully applied theme for: {folder_name}")
                     
                 except Exception as e:
