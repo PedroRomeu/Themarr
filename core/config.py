@@ -12,6 +12,8 @@ def get_base_path():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 APP_ROOT_DIR = get_base_path()
+# Files bundled by PyInstaller (templates, static, jellyfin) live in _internal next to the exe
+BUNDLE_DIR = getattr(sys, '_MEIPASS', APP_ROOT_DIR)
 IS_WINDOWS = os.name == 'nt'
 
 # ==========================================

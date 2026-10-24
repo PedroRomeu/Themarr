@@ -15,7 +15,7 @@ try:
 except ImportError:  # headless server: no native windows or dialogs
     webview = None
 
-from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, PATH_MAP, PUBLIC_URL, APP_ROOT_DIR
+from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, PATH_MAP, PUBLIC_URL, BUNDLE_DIR
 from core.safety import check_theme_write, check_media_read, is_theme_file, is_season_folder_name, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
@@ -901,7 +901,7 @@ class Api:
             
     def jellyfin_buttons_script(self):
         """jellyfin/themarr-buttons.js with THEMARR_URL_SETTING filled from THEMARR_PUBLIC_URL"""
-        with open(os.path.join(APP_ROOT_DIR, 'jellyfin', 'themarr-buttons.js'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(BUNDLE_DIR, 'jellyfin', 'themarr-buttons.js'), 'r', encoding='utf-8') as f:
             script = f.read()
         return re.sub(r"const THEMARR_URL_SETTING = '[^']*';",
                       lambda _: f"const THEMARR_URL_SETTING = {json.dumps(PUBLIC_URL)};", script, count=1)
