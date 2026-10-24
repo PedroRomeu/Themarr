@@ -9,7 +9,7 @@ It assumes a Linux server with Docker and Docker Compose, and Jellyfin already r
 | Piece | What it does |
 | --- | --- |
 | `docker-compose.yml` + `.env` | Builds and runs the container. Everything specific to your server goes in `.env`. |
-| Themarr web UI, port 8686 | Same app as the desktop version, plus a server folder browser. Sign in with a Jellyfin admin account. |
+| Themarr web UI, port 8686 | Same app as the desktop version. Sign in with a Jellyfin admin account. |
 | `jellyfin/themarr-buttons.js` | The buttons inside Jellyfin, loaded by the JavaScript Injector plugin. Themarr can install it for you. |
 
 Tested with Jellyfin 10.10.7 and JavaScript Injector 3.5.0.0. Themarr itself only uses the standard Jellyfin
@@ -110,9 +110,10 @@ Pick one. Themarr has a login, but it is not meant to face the internet.
 
 ## 7. First check, read only
 
-Sign in with a Jellyfin administrator account. Click the button that selects the media folder to open the folder browser. Inside a
-library, each media folder that Jellyfin knows shows its Jellyfin name next to it. If no names appear, Themarr and Jellyfin
-disagree about paths; see [When paths differ](#when-paths-differ).
+Sign in with a Jellyfin administrator account. The Library lists every media folder under `/data`, one library per
+folder (Settings > Media folders lets you choose which libraries to show). Media that Jellyfin knows show their poster
+and official name, and their page says "Matched in Jellyfin". If none do, Themarr and Jellyfin disagree about paths;
+see [When paths differ](#when-paths-differ).
 
 Saving a theme now fails with a "Read-only file system" error, which is expected with `MEDIA_ACCESS=ro`.
 
@@ -127,7 +128,7 @@ Settings > Display).
 1. Install the **JavaScript Injector** plugin: Jellyfin > Dashboard > Plugins > Repositories > **+**, URL
    `https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/manifest.json`. Then Catalog >
    JavaScript Injector > Install, and restart Jellyfin.
-2. In Themarr, open Settings and click **Install Themarr buttons in Jellyfin**. It adds a script named
+2. In Themarr, open Settings and, under Jellyfin, click **Install** next to Buttons in Jellyfin. It adds a script named
    `Themarr buttons` to the plugin, or updates it, and leaves any other scripts alone.
 3. Reload Jellyfin with Ctrl+F5. Administrators see a music note in the header and on media pages; other users
    see nothing.
@@ -175,7 +176,7 @@ After an update that changed `jellyfin/themarr-buttons.js`, click **Install Them
 | `network ... declared as external, but could not be found` | Wrong `JELLYFIN_NETWORK`; see step 4. |
 | Login says Jellyfin is unreachable | `JELLYFIN_URL` wrong, or Themarr is not on Jellyfin's network. |
 | Login rejected for a valid account | Only Jellyfin administrators can sign in. |
-| No Jellyfin names in the folder browser | Paths differ; see [When paths differ](#when-paths-differ). |
+| No posters or Jellyfin names in the Library | Paths differ; see [When paths differ](#when-paths-differ). |
 | Saving fails with "Read-only file system" | `MEDIA_ACCESS` is still `ro`. |
 | Saving fails with "Permission denied" | `PUID`/`PGID` do not own the media files. |
 | "Blocked ... outside the media folder" | The folder is not under `/data`. |

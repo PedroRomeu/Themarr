@@ -36,10 +36,11 @@ Jellyfin's own pages that opens the current series or movie in Themarr.
 ## Features
 
 **Finding and downloading**
-- YouTube search inside the app, with thumbnails, duration and an embedded preview.
-- A download queue: name each track, choose its destination (main theme or a season), reorder by dragging,
-  retry only the items that failed.
-- Precise trimming with start and end times and a live audio preview before anything is downloaded.
+- YouTube search inside the app, or paste a link. Listen to the result before downloading anything.
+- Mark where the theme starts and ends while it plays, name it, and choose where it goes: the main theme or a
+  season.
+- A background download queue, like the *arr apps: it keeps going when you close the page, can be paused, and
+  retries only what failed.
 
 **Audio**
 - Loudness normalization with FFmpeg `loudnorm` (default target -24 LUFS, adjustable), so themes do not jump
@@ -53,12 +54,13 @@ Jellyfin's own pages that opens the current series or movie in Themarr.
   season poster for season themes.
 
 **Library**
-- Library Manager: every theme in your library in one place, with preview, rename, trim, re-normalize, re-tag
-  and delete, per track or for a whole folder at once.
-- Theme Assistant: lists the media with no theme yet and suggests the top YouTube results for each one.
-- Organize: creates a season folder and moves loose episode and subtitle files into it, never overwriting
+- Every series and movie of your libraries as posters or a table, with how many themes each one has.
+- A page per media with its themes, main and per season: play, trim, rename, re-normalize, re-tag or delete.
+- Missing: the media with no theme yet, each with the top YouTube results to pick from.
+- Bulk actions on a selection: normalize, audio effects, re-tag, organize, remove themes.
+- Organize creates a season folder and moves loose episode and subtitle files into it, never overwriting
   anything.
-- Backup and restore of all your themes as a single `.zip`.
+- Backup and restore of the themes of a library as a single `.zip`.
 
 **Jellyfin integration**
 - Folders are matched to Jellyfin items by path, with name search as a fallback.
@@ -127,10 +129,13 @@ python main.py
 ## Quick start
 
 1. In Jellyfin, open your user settings, go to **Display** and enable **Theme songs**.
-2. Open Themarr. In **Settings**, enter your Jellyfin URL and an API key (Dashboard, API Keys) and test the
-   connection. The Docker setup reads both from `.env`.
-3. Select a media folder, search for its opening, trim it if needed and click **Add** to queue it.
-4. Click **Start Processing**. When it finishes, open the series in Jellyfin and the theme plays.
+2. Open Themarr. In **Settings**, add your media folders (one per library, such as TV and Movies), then enter
+   your Jellyfin address and an API key (Dashboard, API Keys) and test the connection. The Docker setup reads
+   the media folder and Jellyfin from `.env`.
+3. In **Library**, open a series and click **Add Theme**. Pick a search result, listen to it, mark the start and
+   end if needed, and click **Add to queue**.
+4. The theme downloads in the background (see **Activity**). When it is done, open the series in Jellyfin and
+   the theme plays.
 
 ## Requirements
 
