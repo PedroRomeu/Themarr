@@ -25,7 +25,7 @@ class LocalMediaFolderTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = os.path.realpath(self.tmp.name)
-        for rel in ("Animes/Frieren", "TV/Dark", "TV/Shared", "Movies/Shared", "Movies/Up (2009)"):
+        for rel in ("Series/Lost", "TV/Dark", "TV/Shared", "Movies/Shared", "Movies/Up (2009)"):
             os.makedirs(os.path.join(self.root, rel))
 
     def tearDown(self):
@@ -35,11 +35,11 @@ class LocalMediaFolderTests(unittest.TestCase):
         return os.path.join(self.root, *parts)
 
     def test_same_path(self):
-        self.assertEqual(local_media_folder(self.local("Animes", "Frieren"), self.root), self.local("Animes", "Frieren"))
+        self.assertEqual(local_media_folder(self.local("Series", "Lost"), self.root), self.local("Series", "Lost"))
 
     def test_other_mount_point_same_library_names(self):
-        # Jellyfin: /media/Animes/Frieren, Themarr: <root>/Animes/Frieren
-        self.assertEqual(local_media_folder("/media/Animes/Frieren", self.root), self.local("Animes", "Frieren"))
+        # Jellyfin: /media/Series/Lost, Themarr: <root>/Series/Lost
+        self.assertEqual(local_media_folder("/media/Series/Lost", self.root), self.local("Series", "Lost"))
 
     def test_windows_style_path(self):
         self.assertEqual(local_media_folder(r"D:\Medias\TV\Dark", self.root), self.local("TV", "Dark"))
@@ -71,7 +71,7 @@ class LocalMediaFolderTests(unittest.TestCase):
             os.rmdir(outside)
 
     def test_missing(self):
-        self.assertIsNone(local_media_folder("/media/Animes/Nope", self.root))
+        self.assertIsNone(local_media_folder("/media/Series/Nope", self.root))
         self.assertIsNone(local_media_folder("", self.root))
 
     def test_desktop_no_root(self):

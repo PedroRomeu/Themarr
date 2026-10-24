@@ -31,16 +31,16 @@ def safe_move(src, dst):
     shutil.move(src, dst)
     return True
 
-def generate_destination_path(anime_folder, theme_type, custom_name, season_folder=None, multiple_main=False):
+def generate_destination_path(media_folder, theme_type, custom_name, season_folder=None, multiple_main=False):
     if not custom_name.endswith('.mp3'):
         custom_name += '.mp3'
         
     if theme_type == 'temporada' or theme_type == 'season':
-        final_folder = os.path.join(anime_folder, season_folder, 'theme-music')
+        final_folder = os.path.join(media_folder, season_folder, 'theme-music')
         final_file = os.path.join(final_folder, custom_name)
     elif theme_type == 'main':
-        theme_music_folder = os.path.join(anime_folder, 'theme-music')
-        loose_theme_file = os.path.join(anime_folder, 'theme.mp3')
+        theme_music_folder = os.path.join(media_folder, 'theme-music')
+        loose_theme_file = os.path.join(media_folder, 'theme.mp3')
         
         if multiple_main or os.path.isdir(theme_music_folder):
             final_folder = theme_music_folder
@@ -58,7 +58,7 @@ def generate_destination_path(anime_folder, theme_type, custom_name, season_fold
             final_file = os.path.join(final_folder, custom_name)
             
         else:
-            final_folder = anime_folder
+            final_folder = media_folder
             final_file = os.path.join(final_folder, 'theme.mp3')
     else:
         raise ValueError("Theme type must be 'main' or 'season'.")

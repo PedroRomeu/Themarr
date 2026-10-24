@@ -88,7 +88,7 @@ def get_library_index(jellyfin_url, api_key, force_refresh=False):
 
 def match_media_folder(index, folder):
     """Item whose media folder is `folder` (a full path or just the folder name). Compares from the end of the path, so
-    D:\\Medias\\Animes\\X and /data/Animes/X match each other. Returns None when nothing or more than one item fits"""
+    D:\\Media\\TV\\X and /data/TV/X match each other. Returns None when nothing or more than one item fits"""
     target = _path_parts(folder)
     if not target:
         return None

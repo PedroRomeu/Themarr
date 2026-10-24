@@ -109,13 +109,13 @@ input[type=number]::-webkit-outer-spin-button {
     transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out;
 }
 
-.library-anime-card {
+.library-media-card {
     background-color: rgba(23, 23, 23, 0.2);
     border: 1px solid rgba(64, 64, 64, 0.4);
     border-radius: 6px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.library-anime-card:hover {
+.library-media-card:hover {
     border-color: rgba(59, 130, 246, 0.4);
     background-color: rgba(38, 38, 38, 0.25);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);

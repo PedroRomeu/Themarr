@@ -394,7 +394,7 @@ async function loadFolderCheckboxes(path) {
         
         if (res.status === 'success' && res.folders && res.folders.length > 0) {
             container.innerHTML = res.folders.map(folder => {
-                const shouldBeChecked = (res.selected_anime && res.selected_anime === folder) ? 'checked' : '';
+                const shouldBeChecked = (res.selected_media && res.selected_media === folder) ? 'checked' : '';
 
                 return `
                     <label class="flex items-center gap-2 hover:bg-[#333333] p-1.5 rounded cursor-pointer transition">
@@ -1439,7 +1439,7 @@ function adjustQueueVolume(value) {
 let libraryScope = 'selected';
 let libraryData = [];         
 let libraryAudio = new Audio();
-let currentLibPlayingAnimeIdx = null;
+let currentLibPlayingMediaIdx = null;
 let currentLibPlayingTrackIdx = null;
 
 function openLibraryModal() {
@@ -1484,9 +1484,9 @@ async function loadLibraryData(preserveState = false) {
     if (preserveState) {
         document.querySelectorAll('[id^="lib-accordion-body-"]').forEach(body => {
             if (!body.classList.contains('hidden')) {
-                const animeIdx = parseInt(body.id.replace('lib-accordion-body-', ''));
-                if (libraryData[animeIdx]) {
-                    openMediaNames.push(libraryData[animeIdx].anime_name);
+                const mediaIdx = parseInt(body.id.replace('lib-accordion-body-', ''));
+                if (libraryData[mediaIdx]) {
+                    openMediaNames.push(libraryData[mediaIdx].media_name);
                 }
             }
         });
@@ -1553,21 +1553,21 @@ function renderLibrary(openMediaNames = []) {
     summaryLabel.innerText = `${libraryData.length} folder(s) loaded`;
     container.innerHTML = "";
     
-    libraryData.forEach((anime, animeIdx) => {
-        const hasTracks = anime.tracks && anime.tracks.length > 0;
-        const trackCount = hasTracks ? anime.tracks.length : 0;
+    libraryData.forEach((media, mediaIdx) => {
+        const hasTracks = media.tracks && media.tracks.length > 0;
+        const trackCount = hasTracks ? media.tracks.length : 0;
 
-        const isExpanded = openMediaNames.includes(anime.anime_name);
+        const isExpanded = openMediaNames.includes(media.media_name);
         
-        const animeCard = document.createElement('div');
-        animeCard.className = "bg-neutral-900/40 border border-neutral-850 rounded-lg overflow-hidden library-anime-card";
-        animeCard.id = `lib-anime-card-${animeIdx}`;
+        const mediaCard = document.createElement('div');
+        mediaCard.className = "bg-neutral-900/40 border border-neutral-850 rounded-lg overflow-hidden library-media-card";
+        mediaCard.id = `lib-media-card-${mediaIdx}`;
         
-        animeCard.innerHTML = `
-            <div class="flex items-center justify-between px-4 py-3.5 cursor-pointer select-none" onclick="toggleLibraryAccordion(${animeIdx})">
+        mediaCard.innerHTML = `
+            <div class="flex items-center justify-between px-4 py-3.5 cursor-pointer select-none" onclick="toggleLibraryAccordion(${mediaIdx})">
                 <div class="flex items-center gap-3 min-w-0 flex-1">
-                    <span id="lib-chevron-${animeIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200 flex-shrink-0" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
-                    <span class="font-semibold text-neutral-200 text-sm tracking-wide truncate" title="${escapeHtml(anime.anime_name)}">${escapeHtml(anime.anime_name)}</span>
+                    <span id="lib-chevron-${mediaIdx}" class="text-neutral-500 text-[10px] transition-transform duration-200 flex-shrink-0" style="${isExpanded ? 'transform: rotate(90deg);' : ''}">❯</span>
+                    <span class="font-semibold text-neutral-200 text-sm tracking-wide truncate" title="${escapeHtml(media.media_name)}">${escapeHtml(media.media_name)}</span>
                     <span class="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap">
                         ${trackCount} ${trackCount === 1 ? 'track' : 'tracks'}
                     </span>
@@ -1575,28 +1575,28 @@ function renderLibrary(openMediaNames = []) {
 
                 <div class="flex items-center gap-2 flex-shrink-0 ml-3" onclick="event.stopPropagation()">
                     ${hasTracks ? `
-                    <button onclick="applyAllTracksInMedia(${animeIdx})" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors">
+                    <button onclick="applyAllTracksInMedia(${mediaIdx})" class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/50 text-neutral-300 hover:text-white rounded text-[11px] font-medium transition-colors">
                         ⚡ Apply All
                     </button>
                     ` : ''}
-                    <button onclick="runLocalFolderAction('structure', ${animeIdx})" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
+                    <button onclick="runLocalFolderAction('structure', ${mediaIdx})" class="px-2.5 py-1 bg-neutral-850 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-white rounded text-[11px] transition-colors">
                         📂 Organize Folder
                     </button>
                 </div>
             </div>
             
-            <div id="lib-accordion-body-${animeIdx}" class="library-accordion-content ${isExpanded ? '' : 'hidden'} border-t border-neutral-850 bg-neutral-950/40 px-4 py-3 space-y-2">
-                ${hasTracks ? '' : `<p class="text-xs text-neutral-600 py-1 text-center">No downloaded tracks inside this anime folder.</p>`}
+            <div id="lib-accordion-body-${mediaIdx}" class="library-accordion-content ${isExpanded ? '' : 'hidden'} border-t border-neutral-850 bg-neutral-950/40 px-4 py-3 space-y-2">
+                ${hasTracks ? '' : `<p class="text-xs text-neutral-600 py-1 text-center">No downloaded tracks inside this media folder.</p>`}
                 
-                <div class="space-y-2" id="lib-tracks-list-${animeIdx}"></div>
+                <div class="space-y-2" id="lib-tracks-list-${mediaIdx}"></div>
             </div>
         `;
         
-        container.appendChild(animeCard);
+        container.appendChild(mediaCard);
         
         if (hasTracks) {
-            const tracksList = document.getElementById(`lib-tracks-list-${animeIdx}`);
-            anime.tracks.forEach((track, trackIdx) => {
+            const tracksList = document.getElementById(`lib-tracks-list-${mediaIdx}`);
+            media.tracks.forEach((track, trackIdx) => {
                 track.normalize = (track.normalize !== undefined) ? track.normalize : true;
                 track.fades = (track.fades !== undefined) ? track.fades : true;
                 track.tag = (track.tag !== undefined) ? track.tag : true;
@@ -1607,12 +1607,12 @@ function renderLibrary(openMediaNames = []) {
                 trackRow.innerHTML = `
                     <div class="flex items-center justify-between gap-3 flex-wrap">
                         <div class="flex items-center gap-3 min-w-[200px] flex-1">
-                            <button id="libPlayBtn-${animeIdx}-${trackIdx}" onclick="toggleLibraryTrackPlay(${animeIdx}, ${trackIdx})" class="lib-play-btn" title="Play Preview">
+                            <button id="libPlayBtn-${mediaIdx}-${trackIdx}" onclick="toggleLibraryTrackPlay(${mediaIdx}, ${trackIdx})" class="lib-play-btn" title="Play Preview">
                                 ▶
                             </button>
                             <div class="flex flex-col">
                                 <input type="text" value="${escapeHtml(track.file_name)}"  
-                                oninput="updateLibraryTrackNameInMemory(${animeIdx}, ${trackIdx}, this.value)"
+                                oninput="updateLibraryTrackNameInMemory(${mediaIdx}, ${trackIdx}, this.value)"
                                 onmousedown="event.stopPropagation()"
                                 onpointerdown="event.stopPropagation()"
                                 class="bg-transparent border-b border-transparent hover:border-neutral-800/80 focus:border-blue-500 focus:outline-none text-xs font-semibold text-neutral-200 px-1 py-0.5 rounded transition-all max-w-xs break-all"
@@ -1622,38 +1622,38 @@ function renderLibrary(openMediaNames = []) {
                         </div>
                         
                         <div class="flex items-center gap-1.5 bg-neutral-950/60 p-1 rounded border border-neutral-850 text-[10px]">
-                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'normalize')" id="pill-norm-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.normalize ? 'active' : ''}">
+                            <span onclick="toggleLibPill(${mediaIdx}, ${trackIdx}, 'normalize')" id="pill-norm-${mediaIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.normalize ? 'active' : ''}">
                                 LUFS
                             </span>
-                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'fades')" id="pill-fade-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.fades ? 'active' : ''}">
+                            <span onclick="toggleLibPill(${mediaIdx}, ${trackIdx}, 'fades')" id="pill-fade-${mediaIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.fades ? 'active' : ''}">
                                 FADES
                             </span>
-                            <span onclick="toggleLibPill(${animeIdx}, ${trackIdx}, 'tag')" id="pill-tag-${animeIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.tag ? 'active' : ''}">
+                            <span onclick="toggleLibPill(${mediaIdx}, ${trackIdx}, 'tag')" id="pill-tag-${mediaIdx}-${trackIdx}" class="fx-pill px-2 py-0.5 rounded cursor-pointer border border-neutral-800 text-neutral-500 font-medium ${track.tag ? 'active' : ''}">
                                 TAGS
                             </span>
                         </div>
                         
                         <div class="flex items-center gap-2">
-                            <button onclick="toggleLibTrimDrawer(${animeIdx}, ${trackIdx})" class="p-1.5 hover:bg-neutral-800 border border-transparent hover:border-neutral-800 text-neutral-400 hover:text-blue-400 rounded transition-colors" title="Trim Audio">
+                            <button onclick="toggleLibTrimDrawer(${mediaIdx}, ${trackIdx})" class="p-1.5 hover:bg-neutral-800 border border-transparent hover:border-neutral-800 text-neutral-400 hover:text-blue-400 rounded transition-colors" title="Trim Audio">
                                 ✂️
                             </button>
-                            <button onclick="processSingleLibraryTrack(${animeIdx}, ${trackIdx})" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors">
+                            <button onclick="processSingleLibraryTrack(${mediaIdx}, ${trackIdx})" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition-colors">
                                 Apply
                             </button>
-                            <button onclick="deleteSingleLibraryTrack(${animeIdx}, ${trackIdx})" class="p-1.5 hover:bg-red-950/30 border border-transparent hover:border-red-900/30 text-neutral-500 hover:text-red-400 rounded transition-colors" title="Delete Track">
+                            <button onclick="deleteSingleLibraryTrack(${mediaIdx}, ${trackIdx})" class="p-1.5 hover:bg-red-950/30 border border-transparent hover:border-red-900/30 text-neutral-500 hover:text-red-400 rounded transition-colors" title="Delete Track">
                                 ✕
                             </button>
                         </div>
                     </div>
                     
-                    <div id="libPlaybackPanel-${animeIdx}-${trackIdx}" class="hidden flex items-center gap-3 bg-neutral-950/50 p-2 rounded border border-neutral-850 text-xs"
+                    <div id="libPlaybackPanel-${mediaIdx}-${trackIdx}" class="hidden flex items-center gap-3 bg-neutral-950/50 p-2 rounded border border-neutral-850 text-xs"
                          onmousedown="event.stopPropagation()"
                          onpointerdown="event.stopPropagation()">
-                        <input type="range" id="libSlider-${animeIdx}-${trackIdx}" min="0" max="100" value="0" step="0.1" 
-                               oninput="seekLibraryAudio(${animeIdx}, ${trackIdx}, this.value)"
+                        <input type="range" id="libSlider-${mediaIdx}-${trackIdx}" min="0" max="100" value="0" step="0.1" 
+                               oninput="seekLibraryAudio(${mediaIdx}, ${trackIdx}, this.value)"
                                class="trim-slider flex-1">
                         
-                        <span id="libTimeLabel-${animeIdx}-${trackIdx}" class="text-[10px] text-neutral-400 font-mono min-w-[65px] text-right">
+                        <span id="libTimeLabel-${mediaIdx}-${trackIdx}" class="text-[10px] text-neutral-400 font-mono min-w-[65px] text-right">
                             0:00 / 0:00
                         </span>
 
@@ -1661,26 +1661,26 @@ function renderLibrary(openMediaNames = []) {
 
                         <div class="flex items-center gap-1.5 pl-1">
                             <span class="text-[11px] text-neutral-500 select-none" title="Volume">🔊</span>
-                            <input type="range" id="libVolume-${animeIdx}-${trackIdx}" min="0" max="1" step="0.05" value="${queueAudioVolume}" 
+                            <input type="range" id="libVolume-${mediaIdx}-${trackIdx}" min="0" max="1" step="0.05" value="${queueAudioVolume}" 
                                    oninput="adjustLibraryVolume(this.value)"
                                    class="w-12 h-1 rounded bg-neutral-700 cursor-pointer accent-blue-500"
                                    style="height: 4px;">
                         </div>
                     </div>
 
-                    <div id="libTrimDrawer-${animeIdx}-${trackIdx}" class="hidden border-t border-neutral-850/60 pt-2.5 mt-1">
+                    <div id="libTrimDrawer-${mediaIdx}-${trackIdx}" class="hidden border-t border-neutral-850/60 pt-2.5 mt-1">
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-[9px] uppercase tracking-wider text-neutral-400 font-bold mb-1">Start Time (s / MM:SS)</label>
-                                <input type="text" id="libTrimStart-${animeIdx}-${trackIdx}" value="${track.startTime || '0'}" 
-                                       onchange="updateLibTrimTime(${animeIdx}, ${trackIdx}, 'startTime', this.value)"
+                                <input type="text" id="libTrimStart-${mediaIdx}-${trackIdx}" value="${track.startTime || '0'}" 
+                                       onchange="updateLibTrimTime(${mediaIdx}, ${trackIdx}, 'startTime', this.value)"
                                        placeholder="e.g. 5 or 0:05" 
                                        class="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
                             </div>
                             <div>
                                 <label class="block text-[9px] uppercase tracking-wider text-neutral-400 font-bold mb-1">End Time (s / MM:SS)</label>
-                                <input type="text" id="libTrimEnd-${animeIdx}-${trackIdx}" value="${track.endTime || ''}" 
-                                       onchange="updateLibTrimTime(${animeIdx}, ${trackIdx}, 'endTime', this.value)"
+                                <input type="text" id="libTrimEnd-${mediaIdx}-${trackIdx}" value="${track.endTime || ''}" 
+                                       onchange="updateLibTrimTime(${mediaIdx}, ${trackIdx}, 'endTime', this.value)"
                                        placeholder="e.g. 68 or 1:08" 
                                        class="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
                             </div>
@@ -1694,9 +1694,9 @@ function renderLibrary(openMediaNames = []) {
     });
 }
 
-function toggleLibraryAccordion(animeIdx) {
-    const body = document.getElementById(`lib-accordion-body-${animeIdx}`);
-    const chevron = document.getElementById(`lib-chevron-${animeIdx}`);
+function toggleLibraryAccordion(mediaIdx) {
+    const body = document.getElementById(`lib-accordion-body-${mediaIdx}`);
+    const chevron = document.getElementById(`lib-chevron-${mediaIdx}`);
     
     if (body.classList.contains('hidden')) {
         body.classList.remove('hidden');
@@ -1707,13 +1707,13 @@ function toggleLibraryAccordion(animeIdx) {
     }
 }
 
-function toggleLibPill(animeIdx, trackIdx, type) {
-    const track = libraryData[animeIdx].tracks[trackIdx];
+function toggleLibPill(mediaIdx, trackIdx, type) {
+    const track = libraryData[mediaIdx].tracks[trackIdx];
     track[type] = !track[type];
     
-    const pillId = type === 'normalize' ? `pill-norm-${animeIdx}-${trackIdx}` :
-                   type === 'fades' ? `pill-fade-${animeIdx}-${trackIdx}` :
-                   `pill-tag-${animeIdx}-${trackIdx}`;
+    const pillId = type === 'normalize' ? `pill-norm-${mediaIdx}-${trackIdx}` :
+                   type === 'fades' ? `pill-fade-${mediaIdx}-${trackIdx}` :
+                   `pill-tag-${mediaIdx}-${trackIdx}`;
                    
     const pill = document.getElementById(pillId);
     if (track[type]) {
@@ -1723,19 +1723,19 @@ function toggleLibPill(animeIdx, trackIdx, type) {
     }
 }
 
-function toggleLibTrimDrawer(animeIdx, trackIdx) {
-    const drawer = document.getElementById(`libTrimDrawer-${animeIdx}-${trackIdx}`);
+function toggleLibTrimDrawer(mediaIdx, trackIdx) {
+    const drawer = document.getElementById(`libTrimDrawer-${mediaIdx}-${trackIdx}`);
     drawer.classList.toggle('hidden');
 }
 
-function updateLibTrimTime(animeIdx, trackIdx, boundType, value) {
-    libraryData[animeIdx].tracks[trackIdx][boundType] = value;
+function updateLibTrimTime(mediaIdx, trackIdx, boundType, value) {
+    libraryData[mediaIdx].tracks[trackIdx][boundType] = value;
 }
 
-function toggleLibraryTrackPlay(animeIdx, trackIdx) {
-    const isSameTrack = (currentLibPlayingAnimeIdx === animeIdx && currentLibPlayingTrackIdx === trackIdx);
-    const playBtn = document.getElementById(`libPlayBtn-${animeIdx}-${trackIdx}`);
-    const playbackPanel = document.getElementById(`libPlaybackPanel-${animeIdx}-${trackIdx}`);
+function toggleLibraryTrackPlay(mediaIdx, trackIdx) {
+    const isSameTrack = (currentLibPlayingMediaIdx === mediaIdx && currentLibPlayingTrackIdx === trackIdx);
+    const playBtn = document.getElementById(`libPlayBtn-${mediaIdx}-${trackIdx}`);
+    const playbackPanel = document.getElementById(`libPlaybackPanel-${mediaIdx}-${trackIdx}`);
     
     if (isSameTrack && !libraryAudio.paused) {
         libraryAudio.pause();
@@ -1751,14 +1751,14 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx) {
     
     stopLibraryAudio();
     
-    currentLibPlayingAnimeIdx = animeIdx;
+    currentLibPlayingMediaIdx = mediaIdx;
     currentLibPlayingTrackIdx = trackIdx;
     
     playbackPanel.classList.remove('hidden');
     playBtn.innerText = "⏸";
     
-    const slider = document.getElementById(`libSlider-${animeIdx}-${trackIdx}`);
-    const timeLabel = document.getElementById(`libTimeLabel-${animeIdx}-${trackIdx}`);
+    const slider = document.getElementById(`libSlider-${mediaIdx}-${trackIdx}`);
+    const timeLabel = document.getElementById(`libTimeLabel-${mediaIdx}-${trackIdx}`);
 
     libraryAudio.onloadedmetadata = () => {
         timeLabel.innerText = `0:00 / ${formatSeconds(libraryAudio.duration)}`;
@@ -1776,7 +1776,7 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx) {
         stopLibraryAudio();
     };
 
-    const encodedPath = encodeURIComponent(libraryData[animeIdx].tracks[trackIdx].file_path);
+    const encodedPath = encodeURIComponent(libraryData[mediaIdx].tracks[trackIdx].file_path);
     libraryAudio.src = `/api/library/stream?path=${encodedPath}&v=${Date.now()}`;
     libraryAudio.volume = queueAudioVolume;
     libraryAudio.play();
@@ -1785,20 +1785,20 @@ function toggleLibraryTrackPlay(animeIdx, trackIdx) {
 function stopLibraryAudio() {
     libraryAudio.pause();
     
-    if (currentLibPlayingAnimeIdx !== null && currentLibPlayingTrackIdx !== null) {
-        const playBtn = document.getElementById(`libPlayBtn-${currentLibPlayingAnimeIdx}-${currentLibPlayingTrackIdx}`);
-        const playbackPanel = document.getElementById(`libPlaybackPanel-${currentLibPlayingAnimeIdx}-${currentLibPlayingTrackIdx}`);
+    if (currentLibPlayingMediaIdx !== null && currentLibPlayingTrackIdx !== null) {
+        const playBtn = document.getElementById(`libPlayBtn-${currentLibPlayingMediaIdx}-${currentLibPlayingTrackIdx}`);
+        const playbackPanel = document.getElementById(`libPlaybackPanel-${currentLibPlayingMediaIdx}-${currentLibPlayingTrackIdx}`);
         
         if (playBtn) playBtn.innerText = "▶";
         if (playbackPanel) playbackPanel.classList.add('hidden');
     }
     
-    currentLibPlayingAnimeIdx = null;
+    currentLibPlayingMediaIdx = null;
     currentLibPlayingTrackIdx = null;
 }
 
-function seekLibraryAudio(animeIdx, trackIdx, value) {
-    if (currentLibPlayingAnimeIdx === animeIdx && currentLibPlayingTrackIdx === trackIdx && libraryAudio.duration) {
+function seekLibraryAudio(mediaIdx, trackIdx, value) {
+    if (currentLibPlayingMediaIdx === mediaIdx && currentLibPlayingTrackIdx === trackIdx && libraryAudio.duration) {
         const targetTime = (parseFloat(value) / 100) * libraryAudio.duration;
         libraryAudio.currentTime = targetTime;
     }
@@ -1811,21 +1811,21 @@ function syncLibrarySettings() {
     saveAutoSettings();
 }
 
-function updateLibraryTrackNameInMemory(animeIdx, trackIdx, newName) {
-    if (!libraryData[animeIdx] || !libraryData[animeIdx].tracks[trackIdx]) return;
-    libraryData[animeIdx].tracks[trackIdx].new_name = newName.trim();
+function updateLibraryTrackNameInMemory(mediaIdx, trackIdx, newName) {
+    if (!libraryData[mediaIdx] || !libraryData[mediaIdx].tracks[trackIdx]) return;
+    libraryData[mediaIdx].tracks[trackIdx].new_name = newName.trim();
 }
 
-async function processSingleLibraryTrack(animeIdx, trackIdx, autoReload = true) {
+async function processSingleLibraryTrack(mediaIdx, trackIdx, autoReload = true) {
     stopLibraryAudio();
-    const track = libraryData[animeIdx].tracks[trackIdx];
+    const track = libraryData[mediaIdx].tracks[trackIdx];
     
     let finalNewName = track.new_name || track.file_name;
     if (finalNewName && !finalNewName.toLowerCase().endsWith('.mp3')) {
         finalNewName += '.mp3';
     }
 
-    const btn = document.querySelector(`#lib-tracks-list-${animeIdx} > div:nth-child(${trackIdx + 1}) button[onclick^="processSingleLibraryTrack"]`);
+    const btn = document.querySelector(`#lib-tracks-list-${mediaIdx} > div:nth-child(${trackIdx + 1}) button[onclick^="processSingleLibraryTrack"]`);
     if (!btn || btn.disabled) return;
 
     const originalText = btn.innerText;
@@ -1886,8 +1886,8 @@ async function processSingleLibraryTrack(animeIdx, trackIdx, autoReload = true) 
     }
 }
 
-async function deleteSingleLibraryTrack(animeIdx, trackIdx) {
-    const track = libraryData[animeIdx].tracks[trackIdx];
+async function deleteSingleLibraryTrack(mediaIdx, trackIdx) {
+    const track = libraryData[mediaIdx].tracks[trackIdx];
     if (confirm(`Are you sure you want to permanently delete: ${track.file_name}?`)) {
         try {
             const response = await fetch('/api/library/delete', {
@@ -1952,10 +1952,10 @@ async function runBulkLibraryAction(actionType) {
     await startLibraryEnhance(actionType, libraryScope, selectedFolders, target);
 }
 
-async function runLocalFolderAction(actionType, animeIdx) {
-    const media = libraryData[animeIdx];
+async function runLocalFolderAction(actionType, mediaIdx) {
+    const media = libraryData[mediaIdx];
     if (!media) return;
-    await startLibraryEnhance(actionType, 'selected', [media.anime_name], `'${media.anime_name}'`);
+    await startLibraryEnhance(actionType, 'selected', [media.media_name], `'${media.media_name}'`);
 }
 
 function adjustLibraryVolume(value) {
@@ -1974,7 +1974,7 @@ async function applyAllTracksInMedia(mediaIdx) {
     const media = libraryData[mediaIdx];
     if (!media || !media.tracks || media.tracks.length === 0) return;
     
-    showToast(`Applying changes to all tracks in: ${media.anime_name}...`, "info");
+    showToast(`Applying changes to all tracks in: ${media.media_name}...`, "info");
     
     stopLibraryAudio();
     

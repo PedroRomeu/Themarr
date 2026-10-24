@@ -54,7 +54,7 @@ def check_theme_write(path, action="write"):
     if not is_theme_file(path):
         raise UnsafeMediaOperation(f"Blocked {action} of a non-theme file: {path}")
     owner = theme_owner_folder(path)
-    # <MEDIA_ROOT>/<library>/<media>[/<season>]: never the root or a library folder such as /data/Animes
+    # <MEDIA_ROOT>/<library>/<media>[/<season>]: never the root or a library folder such as /data/TV
     depth = len(os.path.relpath(os.path.realpath(owner), MEDIA_ROOT).split(os.sep))
     if depth < 2:
         raise UnsafeMediaOperation(f"Blocked {action}: '{owner}' is not a media or season folder")

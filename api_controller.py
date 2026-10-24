@@ -30,19 +30,19 @@ global_state = {
     "item_statuses": [] 
 }
 
-def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_file=None):
-    print(f"\n[AUTOMATION] 🎬 Starting metadata processing for: {anime_folder_name}")
+def process_folder_artwork(media_folder_path, media_folder_name, config, only_file=None):
+    print(f"\n[AUTOMATION] 🎬 Starting metadata processing for: {media_folder_name}")
     
     local_cover_names = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
     final_image_path = None
     temp_image = False 
     
     final_genre = "" 
-    final_album_name = anime_folder_name 
+    final_album_name = media_folder_name 
     series_id = None
 
     for file_name in local_cover_names:
-        test_path = os.path.join(anime_folder_path, file_name)
+        test_path = os.path.join(media_folder_path, file_name)
         if os.path.exists(test_path) and os.path.getsize(test_path) > 1024:
             print(f"[AUTOMATION] 🔍 Priority 2 Triggered: Local image found ({file_name})")
             final_image_path = test_path
@@ -53,7 +53,7 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_fi
     
     if jelly_url and jelly_api:
         print("[AUTOMATION] 🌐 Querying Jellyfin for additional metadata...")
-        search_result = fetch_jellyfin_data(anime_folder_name, jelly_url, jelly_api, folder_path=anime_folder_path)
+        search_result = fetch_jellyfin_data(media_folder_name, jelly_url, jelly_api, folder_path=media_folder_path)
         
         if search_result["success"]:
             final_genre = search_result["genres"]
@@ -87,7 +87,7 @@ def process_folder_artwork(anime_folder_path, anime_folder_name, config, only_fi
     else:
         mp3_paths = theme_files_only([
             os.path.join(root, file)
-            for root, _, files in os.walk(anime_folder_path)
+            for root, _, files in os.walk(media_folder_path)
             for file in files if file.lower().endswith('.mp3')
         ])
 
@@ -338,7 +338,7 @@ class Api:
         except OSError as e:
             return {"success": False, "message": str(e)}
 
-        # Depth below the media root: 0 = root, 1 = library (Animes), 2 = media, 3 = season
+        # Depth below the media root: 0 = root, 1 = library (TV), 2 = media, 3 = season
         depth = 0 if current == root else len(os.path.relpath(current, root).split(os.sep))
 
         index = []
@@ -426,49 +426,49 @@ class Api:
             else:
                 break
                 
-        anime_folder = current_folder
+        media_folder = current_folder
         
         if not batch_mode:
-            return anime_folder
+            return media_folder
         else:
-            is_anime = False
+            is_media = False
             try:
-                for item in os.listdir(anime_folder):
+                for item in os.listdir(media_folder):
                     item_lower = item.lower()
                     if item_lower == "theme-music" or item_lower.startswith("season"):
-                        is_anime = True
+                        is_media = True
                         break
-                    if os.path.isfile(os.path.join(anime_folder, item)) and item_lower.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
-                        is_anime = True
+                    if os.path.isfile(os.path.join(media_folder, item)) and item_lower.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
+                        is_media = True
                         break
             except:
                 pass
                 
-            if is_anime:
-                parent_folder = os.path.dirname(anime_folder)
+            if is_media:
+                parent_folder = os.path.dirname(media_folder)
                 if os.path.ismount(parent_folder) or len(parent_folder) <= 3:
-                    return anime_folder
+                    return media_folder
                 return parent_folder
             else:
-                return anime_folder
+                return media_folder
 
-    def _auto_organize_single_season(self, anime_folder):
+    def _auto_organize_single_season(self, media_folder):
         try:
-            items_in_folder = os.listdir(anime_folder)
+            items_in_folder = os.listdir(media_folder)
             
-            season_folders = [item for item in items_in_folder if os.path.isdir(os.path.join(anime_folder, item)) and "season" in item.lower()]
+            season_folders = [item for item in items_in_folder if os.path.isdir(os.path.join(media_folder, item)) and "season" in item.lower()]
             has_season = len(season_folders) > 0
             
             if not has_season:
-                anime_name = os.path.basename(anime_folder)
-                new_season_name = f"Season 01. {anime_name}"
-                new_season_path = os.path.join(anime_folder, new_season_name)
+                media_name = os.path.basename(media_folder)
+                new_season_name = f"Season 01. {media_name}"
+                new_season_path = os.path.join(media_folder, new_season_name)
                 
                 media_extensions = ('.mkv', '.mp4', '.avi', '.ass', '.srt', '.vtt')
                 moved_items = 0
                 
                 for item in items_in_folder:
-                    item_path = os.path.join(anime_folder, item)
+                    item_path = os.path.join(media_folder, item)
                     
                     if os.path.isfile(item_path) and item.lower().endswith(media_extensions):
                         os.makedirs(new_season_path, exist_ok=True)
@@ -479,28 +479,28 @@ class Api:
                     print(f"\n[AUTO-ORGANIZE] 🧹 {moved_items} item(s) automatically organized into '{new_season_name}'!")
                     season_folders = [new_season_name] 
             
-            items_in_folder = os.listdir(anime_folder)
+            items_in_folder = os.listdir(media_folder)
             
             has_root_music = False
             for item in items_in_folder:
                 item_lower = item.lower()
-                if item_lower == "theme-music" and os.path.isdir(os.path.join(anime_folder, item)):
+                if item_lower == "theme-music" and os.path.isdir(os.path.join(media_folder, item)):
                     has_root_music = True
-                elif item_lower == "theme.mp3" and os.path.isfile(os.path.join(anime_folder, item)):
+                elif item_lower == "theme.mp3" and os.path.isfile(os.path.join(media_folder, item)):
                     has_root_music = True
                     
             if not has_root_music and len(season_folders) == 1:
-                only_season_path = os.path.join(anime_folder, season_folders[0])
+                only_season_path = os.path.join(media_folder, season_folders[0])
                 season_items = os.listdir(only_season_path)
                 
                 for s_item in season_items:
                     if s_item.lower() == "theme-music" and os.path.isdir(os.path.join(only_season_path, s_item)):
-                        if safe_move(os.path.join(only_season_path, s_item), os.path.join(anime_folder, s_item)):
-                            print(f"\n[AUTO-ORGANIZE] 🎵 Promoted 'theme-music' from '{season_folders[0]}' to Main Anime Folder!")
+                        if safe_move(os.path.join(only_season_path, s_item), os.path.join(media_folder, s_item)):
+                            print(f"\n[AUTO-ORGANIZE] 🎵 Promoted 'theme-music' from '{season_folders[0]}' to the main media folder.")
                         break
                         
         except Exception as e:
-            print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {anime_folder}: {e}")
+            print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {media_folder}: {e}")
 
     def enhance_local_music(self, target_folder, scope, target_lufs, options=None, selected_folders=None):
         check_media_read(target_folder or MEDIA_ROOT or '.')
@@ -553,30 +553,30 @@ class Api:
             audio_effects = current_config.get("audio_fx", {})
             total_folders = len(folders_to_process)
             
-            for i, anime_folder in enumerate(folders_to_process):
-                anime_name = os.path.basename(anime_folder)
+            for i, media_folder in enumerate(folders_to_process):
+                media_name = os.path.basename(media_folder)
                 
                 percentage = int((i / total_folders) * 100) if total_folders > 0 else 0
                 global_state["percentage"] = percentage
-                global_state["statusText"] = f"Enhancing: {anime_name}"
+                global_state["statusText"] = f"Enhancing: {media_name}"
                 global_state["percentageText"] = f"{i}/{total_folders} ({percentage}%)"
                 
                 if options.get("organize", True):
-                    self._auto_organize_single_season(anime_folder)
+                    self._auto_organize_single_season(media_folder)
                 
                 if not options.get("normalize", True) and not options.get("metadata", True) and not options.get("audio_fx", False):
                     continue
 
                 mp3s_in_folder = theme_files_only([
                     os.path.join(root, file)
-                    for root, _, files in os.walk(anime_folder)
+                    for root, _, files in os.walk(media_folder)
                     for file in files if file.lower().endswith('.mp3')
                 ])
                 
                 if not mp3s_in_folder:
                     continue 
                 
-                print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {anime_name}")
+                print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {media_name}")
                 normalize_active = options.get("normalize", True)
                 fx_active = options.get("audio_fx", False)
                 
@@ -590,7 +590,7 @@ class Api:
                         affected_files += 1 
                             
                 if options.get("metadata", True):
-                    process_folder_artwork(anime_folder, anime_name, _artwork_config())
+                    process_folder_artwork(media_folder, media_name, _artwork_config())
                 
             print("\n=======================================================")
             print(f"[ENHANCE] Complete! {affected_files} file(s) modified/read.")
@@ -618,7 +618,7 @@ class Api:
         if scope == 'all':
             target = self._resolve_smart_folders(root_folder, True)
             folders_to_process.append(target)
-            mode_str = "ALL ANIMES (Grandmother)"
+            mode_str = "WHOLE LIBRARY"
             
         elif scope == 'selected' and selected_folders:
             smart_root = self._resolve_smart_folders(root_folder, True)
@@ -626,12 +626,12 @@ class Api:
                 full_path = os.path.join(smart_root, folder_name)
                 if os.path.exists(full_path):
                     folders_to_process.append(full_path)
-            mode_str = f"SELECTED ANIMES ({len(folders_to_process)} folders)"
+            mode_str = f"SELECTED MEDIA ({len(folders_to_process)} folders)"
             
         else:
             target = self._resolve_smart_folders(root_folder, False)
             folders_to_process.append(target)
-            mode_str = "CURRENT ANIME (Mother)"
+            mode_str = "CURRENT MEDIA FOLDER"
     
         deleted_count = 0
         try:
@@ -681,16 +681,16 @@ class Api:
             "item_statuses": global_state["item_statuses"]
         }
     
-    def retry_single_item(self, index, music, root_anime_folder):
-        check_media_read(root_anime_folder or MEDIA_ROOT or '.')
+    def retry_single_item(self, index, music, root_media_folder):
+        check_media_read(root_media_folder or MEDIA_ROOT or '.')
         global_state["is_processing"] = True
         global_state["item_statuses"][index] = "processing"
         global_state["statusText"] = f"Retrying: {music.get('name')}..."
         
-        _start_background(self._execute_single_retry_thread, index, music, root_anime_folder)
+        _start_background(self._execute_single_retry_thread, index, music, root_media_folder)
         return True
 
-    def _execute_single_retry_thread(self, index, music, root_anime_folder):
+    def _execute_single_retry_thread(self, index, music, root_media_folder):
         current_config = self.get_settings()
         audio_effects = current_config.get("audio_fx", {})
         
@@ -717,7 +717,7 @@ class Api:
                 theme_type = "main"
                 temp_folder = None
 
-            final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
+            final_path = generate_destination_path(root_media_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
             
             start_time = music.get('startTime', None)
             end_time = music.get('endTime', None)
@@ -732,10 +732,10 @@ class Api:
             )
             
             if "Season" in destination:
-                move_loose_episodes(root_anime_folder, destination)
+                move_loose_episodes(root_media_folder, destination)
                 
-            process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
-            _refresh_jellyfin(root_anime_folder)
+            process_folder_artwork(root_media_folder, os.path.basename(root_media_folder), _artwork_config())
+            _refresh_jellyfin(root_media_folder)
 
             global_state["item_statuses"][index] = "completed"
             global_state["statusText"] = "Item processed successfully!"
@@ -756,27 +756,27 @@ class Api:
             if "processing" not in global_state["item_statuses"]:
                 global_state["is_processing"] = False
 
-    def process_queue(self, music_list, root_anime_folder):
-        check_media_read(root_anime_folder or MEDIA_ROOT or '.')
+    def process_queue(self, music_list, root_media_folder):
+        check_media_read(root_media_folder or MEDIA_ROOT or '.')
         global_state["is_processing"] = True
         global_state["percentage"] = 0
         global_state["statusText"] = "Starting..."
         global_state["percentageText"] = "0%"
         global_state["item_statuses"] = ["waiting"] * len(music_list)
 
-        _start_background(self._execute_queue_thread, music_list, root_anime_folder)
+        _start_background(self._execute_queue_thread, music_list, root_media_folder)
         return True
 
-    def _execute_queue_thread(self, music_list, root_anime_folder):
+    def _execute_queue_thread(self, music_list, root_media_folder):
         try:
-            self._run_queue(music_list, root_anime_folder)
+            self._run_queue(music_list, root_media_folder)
         except Exception as e:
             print(f"\n[ERROR] Queue stopped by an unexpected error: {e}\n")
             global_state["statusText"] = f"Error: {str(e)}"
         finally:
             global_state["is_processing"] = False
 
-    def _run_queue(self, music_list, root_anime_folder):
+    def _run_queue(self, music_list, root_media_folder):
         current_config = self.get_settings()
         audio_effects = current_config.get("audio_fx", {})
 
@@ -824,7 +824,7 @@ class Api:
                     theme_type = "main"
                     temp_folder = None
 
-                final_path = generate_destination_path(root_anime_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
+                final_path = generate_destination_path(root_media_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
 
                 normalize_and_save(
                     downloaded_file,
@@ -853,16 +853,16 @@ class Api:
         if seasons_to_clean:
             print("\n[SYSTEM] Starting Smart Cleanup on affected seasons...")
             for temp in seasons_to_clean:
-                move_loose_episodes(root_anime_folder, temp)
+                move_loose_episodes(root_media_folder, temp)
 
         global_state["percentage"] = 99
         global_state["statusText"] = "Applying Cover Arts..."
         global_state["percentageText"] = "99%"
 
-        process_folder_artwork(root_anime_folder, os.path.basename(root_anime_folder), _artwork_config())
+        process_folder_artwork(root_media_folder, os.path.basename(root_media_folder), _artwork_config())
 
         if "completed" in global_state["item_statuses"]:
-            _refresh_jellyfin(root_anime_folder)
+            _refresh_jellyfin(root_media_folder)
 
         # Process complete!
         global_state["percentage"] = 100
@@ -923,24 +923,24 @@ class Api:
         check_media_read(folder_path or MEDIA_ROOT or '.')
         try:
             if not folder_path or not os.path.exists(folder_path):
-                return {"status": "error", "folders": [], "selected_anime": ""}
+                return {"status": "error", "folders": [], "selected_media": ""}
             
             root_folder = self._resolve_smart_folders(folder_path, True)
             
             subfolders = [f for f in os.listdir(root_folder) if os.path.isdir(os.path.join(root_folder, f))]
             
-            selected_anime = ""
+            selected_media = ""
             if root_folder.lower() != folder_path.lower():
-                selected_anime = os.path.basename(folder_path)
+                selected_media = os.path.basename(folder_path)
                 
             return {
                 "status": "success", 
                 "folders": subfolders, 
-                "selected_anime": selected_anime
+                "selected_media": selected_media
             }
         except Exception as e:
             print(f"[ERROR] get_subfolders failed: {str(e)}")
-            return {"status": "error", "folders": [], "selected_anime": ""}
+            return {"status": "error", "folders": [], "selected_media": ""}
         
     def search_youtube(self, query):
         if not query or not query.strip():
@@ -998,8 +998,8 @@ class Api:
     def list_local_library(self, base_path, scope="all", selected_folders=None):
         check_media_read(base_path or MEDIA_ROOT or '.')
         """
-        Scan media folders and return a structured list of available anime and their associated theme music tracks.
-        Detects intelligently if the inserted path is the media root or a specific anime folder.
+        Scan media folders and return a structured list of media folders and their associated theme music tracks.
+        Detects intelligently if the inserted path is the media root or a specific media folder.
         """
         if not base_path or not os.path.exists(base_path):
             return {"success": False, "message": "Media Directory not found or not selected."}
@@ -1008,11 +1008,11 @@ class Api:
             selected_folders = []
             
         try:
-            is_single_anime = _is_single_media_folder(base_path)
+            is_single_media = _is_single_media_folder(base_path)
         except Exception:
-            is_single_anime = False
+            is_single_media = False
 
-        if is_single_anime:
+        if is_single_media:
             real_root_path = os.path.dirname(base_path)
             if not selected_folders:
                 selected_folders = [os.path.basename(base_path)]
@@ -1023,36 +1023,36 @@ class Api:
         
         try:
             all_items = os.listdir(real_root_path)
-            anime_folders = [d for d in all_items if os.path.isdir(os.path.join(real_root_path, d))]
+            media_folders = [d for d in all_items if os.path.isdir(os.path.join(real_root_path, d))]
             
-            for folder in anime_folders:
+            for folder in media_folders:
                 if scope == "selected" and folder not in selected_folders:
                     continue
                     
-                anime_path = os.path.join(real_root_path, folder)
+                media_path = os.path.join(real_root_path, folder)
                 tracks = []
                 
-                single_theme_path = os.path.join(anime_path, "theme.mp3")
+                single_theme_path = os.path.join(media_path, "theme.mp3")
                 if os.path.exists(single_theme_path):
                     tracks.append(_track_entry(single_theme_path, "theme.mp3", "Main Theme (Single)", f"theme.mp3 in {folder}"))
 
-                tracks += _theme_folder_tracks(os.path.join(anime_path, "theme-music"), "Main Theme (Folder)", "root theme-music")
+                tracks += _theme_folder_tracks(os.path.join(media_path, "theme-music"), "Main Theme (Folder)", "root theme-music")
 
                 try:
-                    for subitem in os.listdir(anime_path):
-                        subitem_path = os.path.join(anime_path, subitem)
+                    for subitem in os.listdir(media_path):
+                        subitem_path = os.path.join(media_path, subitem)
                         if os.path.isdir(subitem_path):
                             tracks += _theme_folder_tracks(os.path.join(subitem_path, "theme-music"), subitem, "season track")
                 except Exception as e:
                     print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
 
                 library_data.append({
-                    "anime_name": folder,
-                    "folder_path": anime_path,
+                    "media_name": folder,
+                    "folder_path": media_path,
                     "tracks": tracks
                 })
                 
-            library_data.sort(key=lambda x: x["anime_name"].lower())
+            library_data.sort(key=lambda x: x["media_name"].lower())
             return {"success": True, "library": library_data}
             
         except Exception as e:
@@ -1123,8 +1123,8 @@ class Api:
             
             written_files = 0
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for anime in library_data:
-                    for track in anime["tracks"]:
+                for media in library_data:
+                    for track in media["tracks"]:
                         file_path = track["file_path"]
                         if os.path.exists(file_path):
                             arcname = os.path.relpath(file_path, real_root)
@@ -1284,7 +1284,7 @@ class Api:
             for item in library_data:
                 if len(item["tracks"]) == 0:
                     missing_media.append({
-                        "folder_name": item["anime_name"],
+                        "folder_name": item["media_name"],
                         "folder_path": item["folder_path"]
                     })
                     
@@ -1399,7 +1399,7 @@ class Api:
                     global_state["statusText"] = f"Normalizing theme for: {folder_name}"
                     
                     final_path = generate_destination_path(
-                        anime_folder=folder_path,
+                        media_folder=folder_path,
                         theme_type="main",
                         custom_name=track_name,
                         season_folder=None,
