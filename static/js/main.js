@@ -1362,13 +1362,13 @@ async function toggleQueuePlay(index, url) {
             };
             
         } else {
-            alert("Não foi possível carregar a prévia desta música.");
+            showToast("Could not load the preview for this track.", "error");
             playBtn.innerText = "▶";
             playBtn.disabled = false;
             timeLabel.innerText = "Error";
         }
     } catch (err) {
-        console.error("Erro no player da fila:", err);
+        console.error("Queue player error:", err);
         playBtn.innerText = "▶";
         playBtn.disabled = false;
         timeLabel.innerText = "Error";

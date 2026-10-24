@@ -1069,7 +1069,7 @@ class Api:
         try:
             normalize_audio_ffmpeg(file_path, target_lufs, audio_effects, normalize_enabled)
             
-            # Executa a renomeação física do arquivo apenas se o nome mudou
+            # Rename the file on disk only if the name changed
             old_base = os.path.basename(file_path)
             print(f"[LIBRARY] Rename check - Old Name: '{old_base}', New Name: '{new_name}'")
             
@@ -1085,7 +1085,7 @@ class Api:
                 check_theme_write(file_path, "rename")
                 check_theme_write(new_file_path, "rename")
                 os.rename(file_path, new_file_path)
-                file_path = new_file_path  # Mantém a referência atualizada para a injeção de tags
+                file_path = new_file_path  # Keep the path current for the tag writing below
                 print(f"[LIBRARY] Rename completed successfully!")
             else:
                 print(f"[LIBRARY] Rename skipped (name matches or empty new_name)")
@@ -1115,7 +1115,7 @@ class Api:
             
             library_res = self.list_local_library(base_path, scope, selected_folders)
             if not library_res.get("success"):
-                return {"success": False, "message": "Nenhuma música encontrada para exportar."}
+                return {"success": False, "message": "No themes found to export."}
             
             library_data = library_res["library"]
             
@@ -1134,15 +1134,15 @@ class Api:
             if written_files == 0:
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
-                return {"success": False, "message": "Nenhum arquivo físico de áudio encontrado para backup."}
+                return {"success": False, "message": "No theme audio files found to back up."}
                 
             return {
                 "success": True, 
-                "message": f"Backup exportado com sucesso contendo {written_files} música(s)!",
+                "message": f"Backup exported with {written_files} theme(s).",
                 "filename": zip_name
             }
         except Exception as e:
-            print(f"[BACKUP] Erro ao exportar: {e}")
+            print(f"[BACKUP] Export failed: {e}")
             return {"success": False, "message": str(e)}
 
     def select_backup_file(self):
@@ -1168,17 +1168,17 @@ class Api:
                 )
                 file_path = _powershell_dialog(cmd)
         except Exception as e:
-            print(f"[BACKUP] Erro ao selecionar arquivo: {e}")
+            print(f"[BACKUP] Could not select the file: {e}")
         return {"success": bool(file_path), "file_path": file_path}
 
     def analyze_backup(self, zip_path, base_path):
         check_media_read(base_path or MEDIA_ROOT or '.')
         if not zip_path or not os.path.exists(zip_path):
-            return {"success": False, "message": "Arquivo de backup inválido."}
+            return {"success": False, "message": "Invalid backup file."}
         if SERVER_MODE and not _is_uploaded_backup(zip_path):
             return {"success": False, "message": "Upload the backup file through the browser."}
         if not base_path or not os.path.exists(base_path):
-            return {"success": False, "message": "Diretório de mídias não configurado."}
+            return {"success": False, "message": "Media folder is not configured."}
             
         try:
             temp_dir = tempfile.mkdtemp(prefix=IMPORT_PREFIX)
@@ -1208,13 +1208,13 @@ class Api:
                 "media_count": len(backup_media_folders)
             }
         except Exception as e:
-            print(f"[BACKUP] Erro ao analisar backup: {e}")
+            print(f"[BACKUP] Could not analyze the backup: {e}")
             return {"success": False, "message": str(e)}
 
     def finalize_backup_import(self, temp_import_id, base_path, decision, missing_folders):
         # The id is a folder path sent back by the page and is deleted at the end: only accept our own import folders
         if not _is_import_session(temp_import_id):
-            return {"success": False, "message": "Sessão de importação expirou ou é inválida."}
+            return {"success": False, "message": "The import session expired or is invalid. Please import the backup again."}
             
         try:
             real_dest_root = _library_root(base_path)
@@ -1223,7 +1223,7 @@ class Api:
             
             if decision == "cancel":
                 shutil.rmtree(temp_import_id, ignore_errors=True)
-                return {"success": True, "message": "Importação cancelada."}
+                return {"success": True, "message": "Import cancelled."}
                 
             for folder in os.listdir(temp_import_id):
                 temp_folder_path = os.path.join(temp_import_id, folder)
@@ -1240,7 +1240,7 @@ class Api:
                             print(f"[IMPORT] Skipping '{folder}': media folders are never created on the server.")
                             continue
                         os.makedirs(dest_folder_path, exist_ok=True)
-                        print(f"[IMPORT] Criando pasta de mídia ausente: '{folder}'")
+                        print(f"[IMPORT] Creating missing media folder: '{folder}'")
                         
                 for root, _, files in os.walk(temp_folder_path):
                     for file in files:
@@ -1264,10 +1264,10 @@ class Api:
             
             return {
                 "success": True, 
-                "message": f"Importação concluída! Restaurada(s) {imported_count} música(s)."
+                "message": f"Import complete. {imported_count} theme(s) restored."
             }
         except Exception as e:
-            print(f"[BACKUP] Erro ao finalizar importação: {e}")
+            print(f"[BACKUP] Import failed: {e}")
             shutil.rmtree(temp_import_id, ignore_errors=True)
             return {"success": False, "message": str(e)}
 

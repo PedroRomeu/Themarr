@@ -325,7 +325,7 @@ def register_routes(app, api_system):
             return jsonify(result)
         except Exception as e:
             print(f"[FLASK ERROR] Export failed: {e}")
-            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
 
     @app.route('/api/library/backup/select_file', methods=['POST'])
     def api_flask_select_backup_file():
@@ -350,7 +350,7 @@ def register_routes(app, api_system):
             return jsonify(result)
         except Exception as e:
             print(f"[FLASK ERROR] Analyze backup failed: {e}")
-            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
 
     @app.route('/api/library/backup/finalize', methods=['POST'])
     def api_flask_finalize_backup():
@@ -370,7 +370,7 @@ def register_routes(app, api_system):
             return jsonify(result)
         except Exception as e:
             print(f"[FLASK ERROR] Finalize backup failed: {e}")
-            return jsonify({"success": False, "message": f"Erro no servidor Flask: {str(e)}"})
+            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
 
     @app.route('/api/library/assistant/scan', methods=['POST'])
     def api_flask_assistant_scan():

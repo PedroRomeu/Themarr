@@ -256,10 +256,10 @@ def get_streaming_url(youtube_url):
             return {
                 "success": True,
                 "url": info.get('url'),
-                "duration": info.get('duration')  # Duração total em segundos
+                "duration": info.get('duration')  # Total duration in seconds
             }
     except Exception as e:
-        print(f"[AUDIO] Erro ao extrair stream do YouTube: {e}")
+        print(f"[AUDIO] Could not get the YouTube stream: {e}")
         return {"success": False, "error": str(e)}
 
 def download_music(youtube_url):

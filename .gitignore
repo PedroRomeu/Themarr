@@ -1,17 +1,17 @@
-# Ambientes virtuais e cache do Python
+# Python virtual environments and cache
 __pycache__/
 *.pyc
 venv/
 .venv/
 
-# Configurações locais (Segurança!)
+# Local settings (may hold secrets)
 config.json
 
-# Binários pesados (Ffmpeg)
+# Large binaries (FFmpeg)
 bin/
 *.exe
 
-# Builds e compilados (PyInstaller)
+# PyInstaller builds
 build/
 dist/
 *.spec
@@ -19,9 +19,9 @@ dist/
 # Backups
 versions/
 logo.ico/
-# Backups exportados pelo app
+# Backups exported by the app
 backups/
 
-# Config e segredos do container
+# Container config and secrets
 config/
 .env
