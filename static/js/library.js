@@ -25,7 +25,6 @@ App.pages.library = {
                         <button data-view="posters" class="px-2 py-1 rounded" title="Posters">${icon('layout-grid')}</button>
                         <button data-view="table" class="px-2 py-1 rounded" title="Table">${icon('list')}</button>
                     </div>
-                    <button id="libRefresh" class="btn" title="Read the folders again">${icon('refresh-cw')}</button>
                     <button id="libSelect" class="btn">${icon('square-check')}Select</button>
                 </div>
             </div>
@@ -38,12 +37,6 @@ App.pages.library = {
             this.applyFilters();
         });
         view.querySelector('#libSelect').onclick = () => this.toggleSelecting();
-        view.querySelector('#libRefresh').onclick = async () => {
-            await App.loadLibrary(true);
-            this.fillLibraryFilter();
-            this.applyFilters();
-            toast('Library refreshed.', 'success');
-        };
         view.querySelector('#statusFilter').value = this.statusFilter;
         view.querySelector('#statusFilter').onchange = event => { this.statusFilter = event.target.value; this.applyFilters(); };
         view.querySelector('#libFilter').onchange = event => { this.libraryFilter = event.target.value; this.applyFilters(); };

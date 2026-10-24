@@ -8,11 +8,15 @@ App.pages.addTheme = {
     choice: null,       // { url, title, channel, duration, thumbnail }
     stream: null,       // { url, duration }
     loadingStream: false,
+    lastQuery: '',
+    searchToken: 0,
+    memory: new Map(),  // media folder -> last search, so reopening the panel picks up where it was
 
     open(media, destination = 'Main Theme') {
         this.media = media;
         this.results = [];
         this.shown = 0;
+        this.lastQuery = '';
         this.choice = null;
         this.stream = null;
         this.destination = destination;
@@ -39,20 +43,43 @@ App.pages.addTheme = {
 
         drawer.querySelectorAll('[data-close]').forEach(b => b.onclick = () => this.close());
         drawer.querySelector('#atSearchForm').onsubmit = event => { event.preventDefault(); this.search(); };
+        // Leaving the field after changing it searches too, like pressing Enter
+        drawer.querySelector('#atQuery').onchange = () => this.search();
         drawer.querySelector('#atAdd').onclick = () => this.addToQueue();
         document.getElementById('drawerOverlay').onclick = () => this.close();
 
         document.getElementById('drawerOverlay').classList.remove('hidden');
         drawer.classList.remove('translate-x-full');
+        refreshIcons();
+
+        const saved = this.memory.get(media.folder_path);
+        if (saved) {
+            drawer.querySelector('#atQuery').value = saved.query;
+            Object.assign(this, { results: saved.results, shown: saved.shown, lastQuery: saved.lastQuery });
+            this.drawResults();
+            requestAnimationFrame(() => { document.getElementById('atResults').scrollTop = saved.scroll; });
+            return;
+        }
         const season = destination !== 'Main Theme' ? ` ${destination.replace(/^season\s*0*(\d+).*$/i, 'season $1')}` : '';
         drawer.querySelector('#atQuery').value = `${mediaTitle(media)}${season} opening theme`;
-        refreshIcons();
         this.search();
+    },
+
+    remember() {
+        if (!this.media || !this.lastQuery) return;
+        this.memory.set(this.media.folder_path, {
+            query: document.getElementById('atQuery')?.value ?? this.lastQuery,
+            lastQuery: this.lastQuery,
+            results: this.results,
+            shown: this.shown,
+            scroll: document.getElementById('atResults')?.scrollTop || 0,
+        });
     },
 
     close() {
         const drawer = document.getElementById('drawer');
         if (drawer.classList.contains('translate-x-full')) return;
+        this.remember();
         if (Player.key === 'preview') Player.stop();
         drawer.classList.add('translate-x-full');
         document.getElementById('drawerOverlay').classList.add('hidden');
@@ -60,7 +87,10 @@ App.pages.addTheme = {
 
     async search() {
         const query = document.getElementById('atQuery').value.trim();
-        if (!query) return;
+        // Enter and leaving the field can both fire: search each text once
+        if (!query || query === this.lastQuery) return;
+        this.lastQuery = query;
+        const token = ++this.searchToken;
         const list = document.getElementById('atResults');
 
         if (/^https?:\/\//i.test(query)) {
@@ -70,13 +100,17 @@ App.pages.addTheme = {
 
         list.innerHTML = `<div class="py-10 text-center text-faint flex items-center justify-center gap-2">${icon('loader-circle', 'animate-spin')}Searching YouTube...</div>`;
         refreshIcons();
+        let results;
         try {
-            this.results = await api('/api/search_youtube', { query });
+            results = await api('/api/search_youtube', { query });
         } catch {
-            this.results = [];
+            results = [];
         }
+        if (token !== this.searchToken) return;  // a newer search replaced this one
+        this.results = results;
         this.shown = 10;
         this.drawResults();
+        this.remember();
     },
 
     drawResults() {
@@ -98,7 +132,7 @@ App.pages.addTheme = {
 
         list.querySelectorAll('[data-result]').forEach(b => b.onclick = () => this.select(this.results[+b.dataset.result]));
         const more = list.querySelector('#atMore');
-        if (more) more.onclick = () => { this.shown += 10; this.drawResults(); };
+        if (more) more.onclick = () => { this.shown += 10; this.drawResults(); this.remember(); };
     },
 
     nextName(destination) {

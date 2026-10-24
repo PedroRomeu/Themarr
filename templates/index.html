@@ -15,10 +15,13 @@
         <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none"></i>
         <input id="globalSearch" type="search" placeholder="Search library" autocomplete="off" class="field w-full pl-9 py-2">
     </div>
-    <a id="activityIndicator" href="#/activity" class="ml-auto hidden items-center gap-2 px-3 py-1.5 rounded-md text-muted hover:bg-raised hover:text-ink text-xs">
-        <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-60"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-accent"></span></span>
-        <span id="activityIndicatorText"></span>
-    </a>
+    <div class="ml-auto flex items-center gap-1">
+        <a id="activityIndicator" href="#/activity" class="hidden items-center gap-2 px-3 py-1.5 rounded-md text-muted hover:bg-raised hover:text-ink text-xs">
+            <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-60"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-accent"></span></span>
+            <span id="activityIndicatorText"></span>
+        </a>
+        <button id="refreshBtn" class="icon-btn p-2" title="Refresh: read this page again from disk and Jellyfin"><i data-lucide="refresh-cw"></i></button>
+    </div>
 </header>
 
 <div class="flex flex-1 min-h-0">

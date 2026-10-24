@@ -129,7 +129,7 @@ def register_routes(app, api_system):
     # ---------------- Library ----------------
     @app.route('/api/library', methods=['GET'])
     def api_library():
-        return jsonify(api_system.library_overview())
+        return jsonify(api_system.library_overview(fresh=request.args.get('fresh') == '1'))
 
     @app.route('/api/media', methods=['POST'])
     def api_media():

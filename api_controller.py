@@ -588,10 +588,10 @@ class Api:
         save_config(config)
         return {"success": True, "folders": self.get_library_folders()}
 
-    def _jellyfin_index(self):
+    def _jellyfin_index(self, fresh=False):
         config = load_config()
         if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
-            return get_library_index(config["jelly_url"], config["jelly_api"])
+            return get_library_index(config["jelly_url"], config["jelly_api"], force_refresh=fresh)
         return []
 
     @staticmethod
@@ -601,9 +601,9 @@ class Api:
             return None
         return {"id": item.get("Id"), "name": item.get("Name"), "year": item.get("ProductionYear"), "type": item.get("Type")}
 
-    def library_overview(self):
-        """Every media folder of every library folder, with its themes and its Jellyfin item"""
-        index = self._jellyfin_index()
+    def library_overview(self, fresh=False):
+        """Every media folder of every library folder, with its themes and its Jellyfin item. fresh: ask Jellyfin again"""
+        index = self._jellyfin_index(fresh)
         libraries, media = [], []
         for root in self.get_library_folders():
             check_media_read(root)

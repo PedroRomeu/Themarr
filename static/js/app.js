@@ -323,9 +323,9 @@ const Timeline = {
 // ---------------------------------------------------------------------------
 // Data shared by the pages
 // ---------------------------------------------------------------------------
-App.loadLibrary = async function (force = false) {
+App.loadLibrary = async function (force = false, fresh = false) {
     if (App.library && !force) return App.library;
-    const result = await api('/api/library');
+    const result = await api(fresh ? '/api/library?fresh=1' : '/api/library');
     App.library = result.success ? result : { libraries: [], media: [] };
     const missing = App.library.media.filter(m => m.tracks.length === 0).length;
     const badge = document.getElementById('navMissingCount');
@@ -448,6 +448,27 @@ App.updateIndicator = function () {
     badge.classList.toggle('hidden', pending.length === 0);
 };
 
+// Refresh button in the top bar: reads the current page again (folders, Jellyfin, queue, settings)
+App.refresh = async function () {
+    const button = document.getElementById('refreshBtn');
+    const svg = () => button.querySelector('svg');
+    svg()?.classList.add('animate-spin');
+    try {
+        const [settings, queue] = await Promise.all([api('/api/get_settings'), api('/api/queue')]);
+        App.settings = settings;
+        App.queue = queue;
+        App.library = null;
+        App.updateIndicator();
+        await App.loadLibrary(true, true);
+        await App.pages[App.route.name].render(document.getElementById('view'), App.route.arg);
+        refreshIcons();
+    } catch (err) {
+        toast('Could not refresh. Is Themarr still running?', 'error');
+    } finally {
+        setTimeout(() => svg()?.classList.remove('animate-spin'), 300);
+    }
+};
+
 // Queue items of one media folder that are not done yet (shown on its page)
 App.pendingFor = function (folder) {
     return App.queue.items.filter(i => i.media_folder === folder && i.status !== 'completed');
@@ -463,6 +484,7 @@ App.start = async function () {
     App.settings = settings;
     document.getElementById('appVersion').textContent = `v${info.version}`;
 
+    document.getElementById('refreshBtn').onclick = () => App.refresh();
     const search = document.getElementById('globalSearch');
     search.addEventListener('input', () => {
         App.search = search.value.trim().toLowerCase();
