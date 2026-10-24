@@ -1,0 +1,13 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  page: '#141418', side: '#1a1a20', surface: '#1f1f26', raised: '#26262f', line: '#2e2e38',
+  ink: '#e7e7ec', muted: '#9b9ba8', faint: '#6b6b78',
+  accent: { DEFAULT: '#8b5cf6', hover: '#7c3aed', soft: 'rgba(139,92,246,.14)', text: '#c4b5fd' },
+}}}};
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">

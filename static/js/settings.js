@@ -1,0 +1,263 @@
+// Settings page: library folders, audio defaults, Jellyfin, backup and account. Changes save on their own.
+
+App.pages.settings = {
+    async render(view) {
+        const s = App.settings;
+        const fx = s.audio_fx || {};
+        const server = App.info.server_mode;
+        const folders = await api('/api/library/folders').then(r => r.folders || []).catch(() => []);
+        if (App.route.name !== 'settings') return;
+
+        view.innerHTML = `
+            <div class="sticky top-0 z-10 bg-page/95 backdrop-blur border-b border-line px-6 py-3"><h1 class="text-lg font-semibold">Settings</h1></div>
+            <div class="p-6 max-w-3xl space-y-5">
+
+                <section class="card">
+                    <div class="px-5 py-3 border-b border-line"><h2 class="font-medium">Media folders</h2>
+                        <p class="text-xs text-faint mt-0.5">The folders that hold your series and movies, one per library. Each subfolder is one media.</p></div>
+                    <div id="setFolders" class="divide-y divide-line">
+                        ${folders.length ? folders.map(f => `
+                            <div class="px-5 py-3 flex items-center gap-3">
+                                <span class="text-faint">${icon('folder')}</span>
+                                <div class="min-w-0"><div>${esc(f.split(/[\\/]/).filter(Boolean).pop())}</div><div class="font-mono text-[11px] text-faint truncate" title="${esc(f)}">${esc(f)}</div></div>
+                                <button data-remove-folder="${esc(f)}" class="ml-auto icon-btn hover:text-red-400" title="Remove from Themarr (nothing is deleted)">${icon('x')}</button>
+                            </div>`).join('') : `<div class="px-5 py-4 text-xs text-muted">No folders yet.</div>`}
+                        <div class="px-5 py-3"><button id="setAddFolder" class="btn btn-ghost text-accent-text">${icon('plus', 'icon-sm')}Add folder</button></div>
+                    </div>
+                    ${server && !(App.settings.library_folders || []).length && folders.length ? `<p class="px-5 pb-3 text-[11px] text-faint">Showing every folder under ${esc(App.info.media_root)} until you choose your own.</p>` : ''}
+                </section>
+
+                <section class="card">
+                    <div class="px-5 py-3 border-b border-line"><h2 class="font-medium">Audio</h2>
+                        <p class="text-xs text-faint mt-0.5">Defaults for every new theme. You can still change them for one track when you add it.</p></div>
+                    <div class="p-5 grid grid-cols-[180px_1fr] gap-x-6 gap-y-4 items-center max-[700px]:grid-cols-1">
+                        <label class="text-muted" for="setLufs">Loudness</label>
+                        <div class="flex items-center gap-2"><input id="setLufs" type="number" min="-70" max="0" step="1" class="field w-20 text-center" value="${esc(s.lufs)}">
+                            <span class="text-xs text-faint">LUFS. -24 matches TV loudness; closer to 0 is louder.</span></div>
+                        <label class="text-muted">Fade in / fade out</label>
+                        <div class="flex items-center gap-2"><input id="setFadeIn" type="number" min="0" max="10" class="field w-16 text-center" value="${esc(fx.fade_in || 0)}">
+                            <span class="text-faint">/</span><input id="setFadeOut" type="number" min="0" max="10" class="field w-16 text-center" value="${esc(fx.fade_out || 0)}">
+                            <span class="text-xs text-faint">seconds, 0 for none</span></div>
+                        <label class="text-muted" for="setSilence">Silence at the start</label>
+                        <label class="flex items-center gap-2 text-xs"><input id="setSilence" type="checkbox" class="w-4 h-4" ${fx.remove_silence ? 'checked' : ''}>Remove it</label>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                        <div><h2 class="font-medium">Jellyfin</h2><p class="text-xs text-faint mt-0.5">Official names, posters, genres and a rescan after new themes.</p></div>
+                        <label class="ml-auto flex items-center gap-2 text-xs text-muted"><input id="setJellyOn" type="checkbox" class="w-4 h-4" ${s.jelly_check ? 'checked' : ''}>Use Jellyfin</label>
+                    </div>
+                    <div class="p-5 grid grid-cols-[180px_1fr] gap-x-6 gap-y-4 items-center max-[700px]:grid-cols-1">
+                        <label class="text-muted" for="setJellyUrl">Server address</label>
+                        <input id="setJellyUrl" class="field" placeholder="http://192.168.1.20:8096" value="${esc(s.jelly_url)}">
+                        <label class="text-muted" for="setJellyKey">API key</label>
+                        <div><input id="setJellyKey" type="password" class="field w-full" placeholder="Jellyfin Dashboard, API Keys" value="${esc(s.jelly_api)}">
+                            <p class="text-[11px] text-faint mt-1">Use an administrator key: rescans and the buttons need it.</p></div>
+                        <span></span>
+                        <div class="flex items-center gap-3"><button id="setTest" class="btn">${icon('plug-zap')}Test connection</button><span id="setTestResult" class="text-xs"></span></div>
+                        ${server ? `
+                        <label class="text-muted">Buttons in Jellyfin</label>
+                        <div>
+                            <div class="flex items-center gap-3"><button id="setButtons" class="btn">${icon('mouse-pointer-click')}Install</button><span id="setButtonsResult" class="text-xs"></span></div>
+                            <p class="text-[11px] text-faint mt-1">Adds a Themarr button to series, season and movie pages, for administrators. Needs the JavaScript Injector plugin. <a href="/jellyfin/themarr-buttons.js" target="_blank" class="text-accent-text hover:underline">View the script</a> to paste it by hand.</p>
+                        </div>` : ''}
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="px-5 py-3 border-b border-line"><h2 class="font-medium">Backup</h2>
+                        <p class="text-xs text-faint mt-0.5">All the themes of one library in a .zip, to keep a copy or move them to another computer.</p></div>
+                    <div class="p-5 flex flex-wrap items-center gap-2">
+                        <select id="setBackupLib" class="field py-1.5 text-xs">${folders.map(f => `<option value="${esc(f)}">${esc(f.split(/[\\/]/).pop())}</option>`).join('')}</select>
+                        <button id="setExport" class="btn" ${folders.length ? '' : 'disabled'}>${icon('download')}Export</button>
+                        <button id="setImport" class="btn" ${folders.length ? '' : 'disabled'}>${icon('upload')}Restore</button>
+                    </div>
+                </section>
+
+                ${server ? `
+                <section class="card px-5 py-4 flex items-center gap-3">
+                    <div><h2 class="font-medium">Account</h2><p class="text-xs text-faint mt-0.5">Signed in as <span class="text-ink">${esc(App.info.user)}</span>, a Jellyfin administrator.</p></div>
+                    <form method="post" action="/logout" class="ml-auto"><button class="btn">${icon('log-out')}Sign out</button></form>
+                </section>` : `
+                <section class="card px-5 py-4 flex items-center gap-3">
+                    <div><h2 class="font-medium">Tray app</h2><p class="text-xs text-faint mt-0.5">Themarr_Server.exe runs from the tray and opens Themarr in your browser.</p></div>
+                    <label class="ml-auto flex items-center gap-2 text-xs text-muted"><input id="setOpenBrowser" type="checkbox" class="w-4 h-4" ${s.open_browser ? 'checked' : ''}>Open the browser on start</label>
+                </section>`}
+
+                <p class="text-[11px] text-faint text-center pt-2">Themarr ${esc(App.info.version)} · <a href="https://github.com/themarr-jellyfin/Themarr" target="_blank" class="hover:text-muted">GitHub</a></p>
+            </div>`;
+
+        this.bind(view, folders);
+        refreshIcons();
+    },
+
+    bind(view, folders) {
+        const $ = id => view.querySelector(`#${id}`);
+
+        const saveAudio = () => {
+            const lufs = Math.max(-70, Math.min(0, parseInt($('setLufs').value, 10) || -24));
+            const fadeIn = Math.max(0, Math.min(10, parseFloat($('setFadeIn').value) || 0));
+            const fadeOut = Math.max(0, Math.min(10, parseFloat($('setFadeOut').value) || 0));
+            const silence = $('setSilence').checked;
+            App.saveSettings({
+                lufs: String(lufs),
+                audio_fx: { enabled: fadeIn > 0 || fadeOut > 0 || silence, remove_silence: silence, fade_in: fadeIn, fade_out: fadeOut },
+            }).then(ok => ok && toast('Audio settings saved.', 'success'));
+        };
+        ['setLufs', 'setFadeIn', 'setFadeOut', 'setSilence'].forEach(id => $(id).onchange = saveAudio);
+
+        const saveJellyfin = () => App.saveSettings({
+            jelly_check: $('setJellyOn').checked, jelly_url: $('setJellyUrl').value.trim(), jelly_api: $('setJellyKey').value.trim(),
+        }).then(ok => { if (ok) { App.library = null; toast('Jellyfin settings saved.', 'success'); } });
+        ['setJellyOn', 'setJellyUrl', 'setJellyKey'].forEach(id => $(id).onchange = saveJellyfin);
+
+        $('setTest').onclick = async () => {
+            const out = $('setTestResult');
+            out.className = 'text-xs text-muted';
+            out.textContent = 'Testing...';
+            const result = await api('/api/test_jellyfin', { url: $('setJellyUrl').value, api_key: $('setJellyKey').value });
+            out.className = `text-xs ${result.status === 'success' ? 'text-green-400' : 'text-red-400'}`;
+            out.textContent = result.message.replace(/^[✅❌]\s*/, '');
+        };
+
+        const buttons = $('setButtons');
+        if (buttons) buttons.onclick = async () => {
+            const out = $('setButtonsResult');
+            out.className = 'text-xs text-muted';
+            out.textContent = 'Installing...';
+            const result = await api('/api/jellyfin/install_buttons', {});
+            out.className = `text-xs ${result.success ? 'text-green-400' : 'text-red-400'}`;
+            out.textContent = result.message;
+        };
+
+        const openBrowser = $('setOpenBrowser');
+        if (openBrowser) openBrowser.onchange = () => App.saveSettings({ open_browser: openBrowser.checked });
+
+        view.querySelectorAll('[data-remove-folder]').forEach(button => button.onclick = () =>
+            this.saveFolders(folders.filter(f => f !== button.dataset.removeFolder)));
+        $('setAddFolder').onclick = () => this.addFolder(folders);
+        $('setExport').onclick = () => this.exportBackup($('setBackupLib').value);
+        $('setImport').onclick = () => this.importBackup($('setBackupLib').value);
+    },
+
+    async saveFolders(folders) {
+        const result = await api('/api/library/folders', { folders });
+        if (!result.success) return toast(result.message, 'error');
+        App.settings.library_folders = folders;
+        App.library = null;
+        App.render();
+    },
+
+    async addFolder(current) {
+        let folder;
+        if (App.info.server_mode) {
+            folder = await this.pickServerFolder();
+        } else {
+            const result = await api('/api/select_folder', {});
+            folder = result.success ? result.path : null;
+        }
+        if (folder && !current.includes(folder)) this.saveFolders([...current, folder]);
+    },
+
+    // Server: browse the media volume and pick a library folder (one level below it)
+    pickServerFolder() {
+        return new Promise(resolve => {
+            const show = async path => {
+                const result = await api('/api/browse_folders', { folder: path });
+                if (!result.success) return toast(result.message, 'error');
+                const atRoot = result.path === result.root;
+                const dialog = openDialog(`
+                    <div class="px-5 py-4 border-b border-line"><h2 class="font-semibold">Add a media folder</h2>
+                        <p class="text-xs text-faint mt-0.5">Choose a library folder, such as TV or Movies.</p></div>
+                    <div class="px-5 pt-3 text-xs text-muted flex flex-wrap items-center gap-1">${result.breadcrumb.map((c, i) =>
+                        `${i ? '<span class="text-faint">/</span>' : ''}<button data-path="${esc(c.path)}" class="hover:text-ink">${esc(c.name)}</button>`).join('')}</div>
+                    <div class="max-h-80 overflow-y-auto scroll px-3 py-2">
+                        ${result.folders.length ? result.folders.map(f => `
+                            <button data-path="${esc(f.path)}" ${atRoot ? `data-pick="${esc(f.path)}"` : ''} class="w-full text-left px-2 py-2 rounded-md hover:bg-raised flex items-center gap-2">
+                                <span class="text-faint">${icon('folder')}</span><span class="flex-1 truncate">${esc(f.name)}</span>
+                                ${atRoot ? '<span class="text-[11px] text-accent-text">Choose</span>' : ''}
+                            </button>`).join('') : '<p class="px-2 py-4 text-xs text-faint">No folders here.</p>'}
+                    </div>
+                    <div class="px-5 py-3 border-t border-line flex justify-end"><button data-cancel class="btn btn-ghost">Cancel</button></div>`);
+                dialog.querySelectorAll('[data-path]').forEach(b => b.onclick = () => {
+                    if (b.dataset.pick) { closeDialog(); resolve(b.dataset.pick); } else show(b.dataset.path);
+                });
+                dialog.querySelector('[data-cancel]').onclick = () => { closeDialog(); resolve(null); };
+            };
+            show(null);
+        });
+    },
+
+    async exportBackup(folder) {
+        toast('Creating the backup...', 'info');
+        const result = await api('/api/library/backup/export', { base_path: folder });
+        if (!result.success) return toast(result.message, 'error');
+        if (App.info.server_mode) {
+            location.href = `/api/library/backup/download?name=${encodeURIComponent(result.filename)}`;
+        }
+        toast(App.info.server_mode ? result.message : `${result.message} Saved as ${result.filename} in the backups folder next to Themarr.`, 'success');
+    },
+
+    async importBackup(folder) {
+        let zipPath;
+        if (App.info.server_mode) {
+            zipPath = await this.uploadBackup();
+        } else {
+            const result = await api('/api/library/backup/select_file', {});
+            zipPath = result.success ? result.file_path : null;
+        }
+        if (!zipPath) return;
+
+        toast('Reading the backup...', 'info');
+        const analysis = await api('/api/library/backup/analyze', { zip_path: zipPath, base_path: folder });
+        if (!analysis.success) return toast(analysis.message, 'error');
+
+        let decision = 'skip_missing';
+        if (analysis.missing_folders.length) {
+            decision = await this.askMissing(analysis.missing_folders);
+        }
+        const result = await api('/api/library/backup/finalize', {
+            temp_import_id: analysis.temp_import_id, base_path: folder, decision, missing_folders: analysis.missing_folders,
+        });
+        toast(result.message, result.success ? 'success' : 'error');
+        App.library = null;
+    },
+
+    uploadBackup() {
+        return new Promise(resolve => {
+            const input = document.getElementById('backupUploadInput');
+            input.value = '';
+            input.onchange = async () => {
+                const file = input.files[0];
+                if (!file) return resolve(null);
+                toast(`Uploading ${file.name}...`, 'info');
+                const form = new FormData();
+                form.append('file', file);
+                const result = await fetch('/api/library/backup/upload', { method: 'POST', body: form }).then(r => r.json()).catch(() => ({}));
+                if (!result.success) toast(result.message || 'Upload failed.', 'error');
+                resolve(result.success ? result.file_path : null);
+            };
+            input.click();
+        });
+    },
+
+    askMissing(missing) {
+        return new Promise(resolve => {
+            const canCreate = !App.info.server_mode;
+            const dialog = openDialog(`
+                <div class="p-5">
+                    <h2 class="font-semibold text-[15px]">Some media are not in this library</h2>
+                    <p class="text-muted mt-2">The backup has themes for ${missing.length} media folder${missing.length > 1 ? 's' : ''} that this library does not have:</p>
+                    <div class="mt-3 max-h-40 overflow-y-auto scroll bg-page border border-line rounded-md p-2 font-mono text-xs text-muted">${missing.map(esc).join('<br>')}</div>
+                    ${canCreate ? '' : '<p class="text-[11px] text-faint mt-2">On the server, Themarr never creates media folders.</p>'}
+                </div>
+                <div class="px-5 py-3 border-t border-line flex flex-wrap justify-end gap-2">
+                    <button data-d="cancel" class="btn btn-ghost">Cancel</button>
+                    ${canCreate ? '<button data-d="create_all" class="btn">Create folders and import all</button>' : ''}
+                    <button data-d="skip_missing" class="btn btn-primary">Import the others</button>
+                </div>`);
+            dialog.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { closeDialog(); resolve(b.dataset.d); });
+        });
+    },
+};

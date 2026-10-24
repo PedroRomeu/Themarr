@@ -1,157 +1,65 @@
-body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+/* Themarr: what Tailwind utilities do not cover */
+body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
 
-/* Remove arrows from number input */
-input[type=number]::-webkit-inner-spin-button, 
-input[type=number]::-webkit-outer-spin-button { 
-    -webkit-appearance: none; 
-    margin: 0; 
-}
+svg.lucide { width: 16px; height: 16px; flex-shrink: 0; stroke-width: 2; }
+.icon-sm svg.lucide, svg.lucide.icon-sm { width: 14px; height: 14px; }
+.icon-lg svg.lucide, svg.lucide.icon-lg { width: 20px; height: 20px; }
+.icon-xl svg.lucide, svg.lucide.icon-xl { width: 32px; height: 32px; stroke-width: 1.5; }
 
-/* Subtle effect when dragging a queue item */
-.dragging { 
-    opacity: 0.5; 
-    border: 1px dashed #3b82f6; 
-}
+.scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll::-webkit-scrollbar-thumb { background: #2e2e38; border-radius: 4px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
 
-/* Expansive container to Trim */
-.trim-drawer {
-    transition: all 0.3s ease-in-out;
-    max-height: 0;
-    overflow: hidden;
-}
+input[type=range] { accent-color: #8b5cf6; }
+input[type=checkbox], input[type=radio] { accent-color: #8b5cf6; }
+select { background-image: none; }
 
-.trim-drawer.active {
-    max-height: 150px;
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-}
+/* Form controls share one look */
+.field { background: #141418; border: 1px solid #2e2e38; border-radius: 6px; padding: 6px 10px; color: #e7e7ec; outline: none; transition: border-color .15s; }
+.field:focus { border-color: #8b5cf6; }
+.field::placeholder { color: #6b6b78; }
 
-/* Modern customization to progress slider (Input Range) */
-.trim-slider {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 6px;
-    background: #404040;
-    border-radius: 9999px;
-    outline: none;
-    cursor: pointer;
-    transition: background 0.2s;
-}
+.btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 6px 12px; font-size: 12px; border: 1px solid #2e2e38; background: #26262f; color: #e7e7ec; transition: border-color .15s, background .15s; white-space: nowrap; }
+.btn:hover { border-color: #6b6b78; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: #8b5cf6; border-color: #8b5cf6; color: #fff; font-weight: 500; font-size: 13px; padding: 8px 16px; }
+.btn-primary:hover { background: #7c3aed; border-color: #7c3aed; }
+.btn-danger { background: transparent; border-color: rgba(239,68,68,.35); color: #f87171; }
+.btn-danger:hover { background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.6); }
+.btn-ghost { background: transparent; border-color: transparent; color: #9b9ba8; }
+.btn-ghost:hover { color: #e7e7ec; border-color: transparent; background: #26262f; }
+.icon-btn { display: inline-grid; place-items: center; padding: 6px; border-radius: 6px; color: #6b6b78; transition: color .15s, background .15s; }
+.icon-btn:hover { color: #e7e7ec; background: #26262f; }
 
-.trim-slider:hover {
-    background: #525252;
-}
+.card { background: #1f1f26; border: 1px solid #2e2e38; border-radius: 8px; }
+.menu { position: absolute; z-index: 40; min-width: 210px; background: #26262f; border: 1px solid #2e2e38; border-radius: 6px; box-shadow: 0 20px 40px rgba(0,0,0,.5); padding: 4px 0; font-size: 12px; }
+.menu button { width: 100%; text-align: left; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: #e7e7ec; }
+.menu button:hover { background: #1f1f26; }
+.menu button.danger { color: #f87171; }
+.menu button.danger:hover { background: rgba(239,68,68,.1); }
+.menu hr { border-color: #2e2e38; margin: 4px 0; }
 
-.trim-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #3b82f6;
-    cursor: pointer;
-    border: 2px solid #ffffff;
-    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
-    transition: transform 0.1s, background-color 0.1s;
+.poster { aspect-ratio: 2 / 3; border-radius: 6px; overflow: hidden; position: relative; display: grid; place-items: center; }
+.poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.poster-letter { font-size: 2.25rem; font-weight: 700; color: rgba(255,255,255,.55); }
+
+.nav-item { margin: 0 8px; padding: 8px 12px; border-radius: 6px; display: flex; align-items: center; gap: 12px; color: #9b9ba8; cursor: pointer; }
+.nav-item:hover { color: #e7e7ec; background: #26262f; }
+.nav-item.active { background: rgba(139,92,246,.14); color: #ddd6fe; }
+
+/* Sidebar shows only icons on narrow windows (the desktop app) */
+@media (max-width: 1000px) {
+  .sidebar { width: 56px !important; }
+  .sidebar .label { display: none; }
+  .nav-item { justify-content: center; padding: 8px; }
 }
 
-.trim-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-    background: #60a5fa;
-}
+.toast-enter { animation: toast-in .2s ease-out; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-.trim-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #3b82f6;
-    cursor: pointer;
-    border: 2px solid #ffffff;
-    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
-    transition: transform 0.1s, background-color 0.1s;
-}
+.trim-region { position: absolute; top: 0; bottom: 0; background: rgba(139,92,246,.18); border-left: 2px solid #8b5cf6; border-right: 2px solid #8b5cf6; }
+.timeline { position: relative; height: 36px; background: #141418; border: 1px solid #2e2e38; border-radius: 6px; overflow: hidden; cursor: pointer; }
+.timeline .rail { position: absolute; left: 0; right: 0; top: 50%; height: 4px; transform: translateY(-50%); background: #26262f; }
+.timeline .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
 
-.trim-slider::-moz-range-thumb:hover {
-    transform: scale(1.2);
-    background: #60a5fa;
-}
-
-.trim-play-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: #1e1e1e;
-    border: 1px solid #404040;
-    color: #3b82f6;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.trim-play-btn:hover {
-    background: #3b82f6;
-    color: #ffffff;
-    border-color: #3b82f6;
-}
-
-/* ==========================================================================
-   LIBRARY MANAGER STYLES (ACCORDION & BUTTONS)
-   ========================================================================== */
-
-.library-accordion-content {
-    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out;
-}
-
-.library-media-card {
-    background-color: rgba(23, 23, 23, 0.2);
-    border: 1px solid rgba(64, 64, 64, 0.4);
-    border-radius: 6px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.library-media-card:hover {
-    border-color: rgba(59, 130, 246, 0.4);
-    background-color: rgba(38, 38, 38, 0.25);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.fx-pill {
-    transition: all 0.2s ease;
-    user-select: none;
-}
-.fx-pill.active {
-    background-color: rgba(59, 130, 246, 0.1) !important;
-    border-color: rgba(59, 130, 246, 0.5) !important;
-    color: #3b82f6 !important;
-}
-
-.lib-play-btn {
-    width: 26px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background: rgba(38, 38, 38, 0.6);
-    border: 1px solid rgba(64, 64, 64, 0.8);
-    color: #a3a3a3;
-    font-size: 10px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-.lib-play-btn:hover {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
-#toastNotification {
-    z-index: 9999 !important;
-}
+.log-view { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
