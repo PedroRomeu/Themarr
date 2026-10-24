@@ -646,7 +646,7 @@ class Api:
                 for root, subfolders, files in os.walk(target_folder):
                     for file in files:
                         full_path = os.path.join(root, file)
-                        if file.lower().endswith('.mp3') and (not SERVER_MODE or is_theme_file(full_path)):
+                        if is_theme_file(full_path):
                             check_theme_write(full_path, "delete")
                             os.remove(full_path)
                             print(f"[CLEANUP] 🗑️ Removed: {file}")

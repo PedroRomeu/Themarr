@@ -6,7 +6,8 @@ Themarr may only write, rename or delete theme files: <media>/theme.mp3 and
 folder may be created inside an existing media folder (queue and Organize do that, like on desktop).
 Organize moves episodes through core.files.safe_move, which never replaces an existing file.
 
-Desktop mode keeps the original behavior: every check here is a no-op unless SERVER_MODE is on.
+Desktop mode skips the path checks, but bulk actions (Enhance, tagging, Clear Folder) only ever touch
+theme files in every mode, through theme_files_only and is_theme_file.
 """
 import os
 
@@ -71,5 +72,5 @@ def check_media_read(path):
 
 
 def theme_files_only(paths):
-    """In server mode, drops every path that is not a theme file (other MP3s, soundtracks, ...)"""
-    return [p for p in paths if is_theme_file(p)] if SERVER_MODE else list(paths)
+    """Drops every path that is not a theme file (other MP3s, soundtracks, ...), in every mode"""
+    return [p for p in paths if is_theme_file(p)]
