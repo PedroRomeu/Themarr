@@ -133,6 +133,10 @@ Settings > Display).
 3. Reload Jellyfin with Ctrl+F5. Administrators see a music note in the header and on media pages; other users
    see nothing.
 
+On a series, season, episode or movie page the button opens Themarr at `/?item=<Jellyfin item id>`. Themarr
+asks Jellyfin where that item lives, finds the same folder under `/data` and opens its page, ready for
+**Add Theme**. The button in the header opens the Library.
+
 To install by hand instead, open `http://<themarr>/jellyfin/themarr-buttons.js` while signed in to Themarr,
 copy it into a new script in JavaScript Injector, and tick "Requires authentication".
 
@@ -166,7 +170,7 @@ docker compose up -d --build
 
 `.env`, `config/` (settings, login secret, backups) and `docker-compose.override.yml` are kept. If YouTube
 downloads start failing, rebuild without cache to get the newest yt-dlp: `docker compose build --no-cache`.
-After an update that changed `jellyfin/themarr-buttons.js`, click **Install Themarr buttons** again.
+After an update that changed `jellyfin/themarr-buttons.js`, click **Install** again in Settings > Jellyfin.
 
 ## Troubleshooting
 

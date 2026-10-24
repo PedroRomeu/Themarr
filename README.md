@@ -23,10 +23,13 @@ It runs as a Windows desktop app or as a Docker container next to your Jellyfin 
 Jellyfin's own pages that opens the current series or movie in Themarr.
 
 <p align="center">
-  <img src="docs/images/screenshot-main.png" alt="Themarr main screen with the download queue" width="31%" />
-  &nbsp;
-  <img src="docs/images/screenshot-library.png" alt="Library Manager listing the themes of each media folder" width="65%" />
+  <img src="docs/images/screenshot-library.png" alt="Themarr library with a poster for each movie and how many themes it has" width="100%" />
 </p>
+<p align="center">
+  <img src="docs/images/screenshot-add-theme.png" alt="Add Theme panel: YouTube results, preview with start and end marks, name and destination" width="49%" />
+  <img src="docs/images/screenshot-missing.png" alt="Missing page: media without a theme and the suggested YouTube results for each" width="49%" />
+</p>
+<p align="center"><sub>The films in the screenshots and their posters are in the public domain (posters from Wikimedia Commons).</sub></p>
 
 > [!NOTE]
 > Looking for fully automatic themes from a shared database? See
@@ -54,7 +57,8 @@ Jellyfin's own pages that opens the current series or movie in Themarr.
   season poster for season themes.
 
 **Library**
-- Every series and movie of your libraries as posters or a table, with how many themes each one has.
+- Every series and movie of your libraries as posters or a table, with how many themes each one has. Posters
+  come from Jellyfin, or from a `poster.jpg`, `folder.jpg` or `cover.jpg` in the media folder.
 - A page per media with its themes, main and per season: play, trim, rename, re-normalize, re-tag or delete.
 - Missing: the media with no theme yet, each with the top YouTube results to pick from.
 - Bulk actions on a selection: normalize, audio effects, re-tag, organize, remove themes.
