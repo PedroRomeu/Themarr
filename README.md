@@ -4,8 +4,8 @@
   <p><strong>Theme song manager for Jellyfin libraries.</strong><br />
   Find a theme on YouTube, trim it, level its loudness, tag it and drop it in the right folder, for the whole show or for each season.</p>
 
-  <a href="https://github.com/PedroRomeu/Themarr/releases/latest"><img src="https://img.shields.io/github/v/release/PedroRomeu/Themarr?style=for-the-badge" alt="Latest release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/PedroRomeu/Themarr?style=for-the-badge" alt="License: GPL-3.0" /></a>
+  <a href="https://github.com/themarr-jellyfin/Themarr/releases/latest"><img src="https://img.shields.io/github/v/release/themarr-jellyfin/Themarr?style=for-the-badge" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/themarr-jellyfin/Themarr?style=for-the-badge" alt="License: GPL-3.0" /></a>
   <img src="https://img.shields.io/badge/Jellyfin-10.10-00A4DC?style=for-the-badge&logo=jellyfin&logoColor=white" alt="Jellyfin 10.10" />
   <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
 </div>
@@ -21,6 +21,12 @@ the file where Jellyfin expects it. Shows with a different opening per season ge
 
 It runs as a Windows desktop app or as a Docker container next to your Jellyfin server, with a button on
 Jellyfin's own pages that opens the current series or movie in Themarr.
+
+<p align="center">
+  <img src="docs/images/screenshot-main.png" alt="Themarr main screen with the download queue" width="31%" />
+  &nbsp;
+  <img src="docs/images/screenshot-library.png" alt="Library Manager listing the themes of each media folder" width="65%" />
+</p>
 
 > [!NOTE]
 > Looking for fully automatic themes from a shared database? See
@@ -89,7 +95,7 @@ The recommended setup for a home server. Themarr runs as a container on the same
 reached from your browser on port 8686.
 
 ```bash
-git clone https://github.com/PedroRomeu/Themarr.git themarr && cd themarr
+git clone https://github.com/themarr-jellyfin/Themarr.git themarr && cd themarr
 cp env.example .env      # set MEDIA_PATH and JELLYFIN_API_KEY
 docker compose up -d --build
 ```
@@ -102,7 +108,7 @@ The full guide, including folder layout, permissions and the Jellyfin buttons, i
 
 ### Desktop (Windows)
 
-1. Download `Themarr_vX.Y.Z.zip` from the [latest release](https://github.com/PedroRomeu/Themarr/releases/latest).
+1. Download `Themarr_vX.Y.Z.zip` from the [latest release](https://github.com/themarr-jellyfin/Themarr/releases/latest).
 2. Extract it anywhere and run `Themarr_Desktop.exe`, which opens Themarr in its own window.
    `Themarr_Server.exe` does the same from a tray icon and opens it in your browser instead.
 
@@ -140,7 +146,7 @@ python main.py
 - [ ] Crossfades and more audio effects.
 - [ ] Desktop builds for Linux and macOS.
 
-Ideas and bug reports are welcome in [Issues](https://github.com/PedroRomeu/Themarr/issues).
+Ideas and bug reports are welcome in [Issues](https://github.com/themarr-jellyfin/Themarr/issues).
 
 ## Built with
 

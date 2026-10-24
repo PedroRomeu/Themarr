@@ -54,7 +54,7 @@ services:
 ## 2. Get the code
 
 ```bash
-git clone https://github.com/PedroRomeu/Themarr.git ~/themarr
+git clone https://github.com/themarr-jellyfin/Themarr.git ~/themarr
 cd ~/themarr
 cp env.example .env
 ```
