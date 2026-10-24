@@ -46,6 +46,19 @@ App.pages.addTheme = {
         // Leaving the field after changing it searches too, like pressing Enter
         drawer.querySelector('#atQuery').onchange = () => this.search();
         drawer.querySelector('#atAdd').onclick = () => this.addToQueue();
+        // Reaching the end of the list loads the next results, same as "Show more results"
+        const list = drawer.querySelector('#atResults');
+        const loadMoreAtEnd = () => {
+            if (this.shown >= this.results.length || list.scrollTop + list.clientHeight < list.scrollHeight - 80) return;
+            const top = list.scrollTop;
+            this.shown += 10;
+            this.drawResults();
+            list.scrollTop = top;
+            this.remember();
+        };
+        list.addEventListener('scroll', loadMoreAtEnd);
+        // The wheel also counts when the list is too short to scroll at all
+        list.addEventListener('wheel', event => { if (event.deltaY > 0) loadMoreAtEnd(); }, { passive: true });
         document.getElementById('drawerOverlay').onclick = () => this.close();
 
         document.getElementById('drawerOverlay').classList.remove('hidden');
