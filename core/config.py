@@ -11,6 +11,8 @@ def get_base_path():
     # Running as script
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+APP_VERSION = "1.14.0"
+
 APP_ROOT_DIR = get_base_path()
 # Files bundled by PyInstaller (templates, static, jellyfin) live in _internal next to the exe
 BUNDLE_DIR = getattr(sys, '_MEIPASS', APP_ROOT_DIR)
@@ -74,6 +76,7 @@ def load_config():
         "jelly_url": "",
         "jelly_api": "",
         "open_browser": True,
+        "library_folders": [],
         "audio_fx": {
             "enabled": False,
             "remove_silence": False,

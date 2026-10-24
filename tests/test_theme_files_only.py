@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from api_controller import Api
+from api_controller import remove_theme_files, theme_files_in, _media_entry
 from core.safety import theme_files_only
 
 
@@ -16,8 +16,7 @@ FILES = ("theme.mp3", "theme-music/Opening 1.mp3", "Season 1/theme-music/Opening
 class ThemeFilesOnlyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.library = self.tmp.name
-        self.show = os.path.join(self.library, "Show")
+        self.show = os.path.join(self.tmp.name, "Show")
         for rel in FILES:
             path = os.path.join(self.show, rel)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -27,20 +26,27 @@ class ThemeFilesOnlyTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def rel(self, paths):
+        return sorted(os.path.relpath(p, self.show).replace(os.sep, "/") for p in paths)
+
     def remaining(self):
-        return sorted(os.path.relpath(os.path.join(d, f), self.show).replace(os.sep, "/")
-                      for d, _, files in os.walk(self.show) for f in files)
+        return self.rel(os.path.join(d, f) for d, _, files in os.walk(self.show) for f in files)
 
     def test_filter_keeps_only_themes(self):
         paths = [os.path.join(self.show, rel) for rel in FILES]
-        kept = [os.path.relpath(p, self.show).replace(os.sep, "/") for p in theme_files_only(paths)]
-        self.assertEqual(kept, list(FILES[:3]))
+        self.assertEqual(self.rel(theme_files_only(paths)), sorted(FILES[:3]))
+        self.assertEqual(self.rel(theme_files_in(self.show)), sorted(FILES[:3]))
 
-    def test_clear_folder_keeps_other_files(self):
-        result = Api().delete_music_folder(self.library, "all")
-        self.assertEqual(result["status"], "success")
+    def test_remove_keeps_other_files(self):
+        self.assertEqual(remove_theme_files(self.show), 3)
         self.assertEqual(self.remaining(), ["Season 1/ep01.mkv", "Soundtrack/ost.mp3", "song.mp3"])
         self.assertFalse(os.path.exists(os.path.join(self.show, "theme-music")))
+
+    def test_media_entry_lists_main_and_season_themes(self):
+        entry = _media_entry(self.show)
+        self.assertEqual(entry["media_name"], "Show")
+        self.assertEqual(sorted((t["location_type"], t["file_name"]) for t in entry["tracks"]), [
+            ("Main Theme (Folder)", "Opening 1.mp3"), ("Main Theme (Single)", "theme.mp3"), ("Season 1", "Opening.mp3")])
 
 
 if __name__ == "__main__":

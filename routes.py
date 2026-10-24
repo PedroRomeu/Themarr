@@ -3,9 +3,10 @@ import re
 import time
 from datetime import timedelta
 
-from flask import render_template, jsonify, request, send_file, session, redirect, url_for
+from flask import render_template, jsonify, request, send_file, session, redirect, url_for, make_response
+from werkzeug.exceptions import HTTPException
 
-from core.config import load_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR
+from core.config import load_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, APP_VERSION
 from core.safety import UnsafeMediaOperation, check_media_read, check_theme_write, is_theme_file
 from api_controller import save_uploaded_backup
 
@@ -63,84 +64,61 @@ def register_routes(app, api_system):
     if SERVER_MODE:
         register_auth(app)
 
+    def body():
+        return request.get_json(force=True, silent=True) or {}
+
     @app.errorhandler(UnsafeMediaOperation)
     def blocked_media_operation(error):
         print(f"[SAFETY] 🛡️ {error}")
         return jsonify({"success": False, "status": "error", "message": str(error)}), 403
 
-    @app.route('/api/app_info', methods=['GET'])
-    def api_flask_app_info():
-        return jsonify({"server_mode": SERVER_MODE, "media_root": MEDIA_ROOT, "user": session.get('user') if SERVER_MODE else None})
-
-    @app.route('/api/browse_folders', methods=['POST'])
-    def api_flask_browse_folders():
-        data = request.get_json(force=True, silent=True) or {}
-        return jsonify(api_system.browse_media_folders(data.get('folder')))
-
-    @app.route('/api/suggest_folders', methods=['POST'])
-    def api_flask_suggest_folders():
-        data = request.get_json(force=True, silent=True) or {}
-        return jsonify(api_system.suggest_media_folders(data.get('text', '')))
-
-    @app.route('/api/select_server_folder', methods=['POST'])
-    def api_flask_select_server_folder():
-        data = request.get_json(force=True, silent=True) or {}
-        return jsonify(api_system.select_server_folder(data.get('folder', '')))
-
-    @app.route('/api/library/backup/upload', methods=['POST'])
-    def api_flask_upload_backup():
-        upload = request.files.get('file')
-        if not upload or not upload.filename.lower().endswith('.zip'):
-            return jsonify({"success": False, "message": "Please choose a .zip backup file."})
-        return jsonify({"success": True, "file_path": save_uploaded_backup(upload)})
-
-    @app.route('/api/library/backup/download')
-    def api_flask_download_backup():
-        name = os.path.basename(request.args.get('name', ''))
-        path = os.path.join(BACKUP_DIR, name)
-        if not re.fullmatch(r'Themarr_Backup_\d{8}_\d{6}\.zip', name) or not os.path.isfile(path):
-            return "Backup not found", 404
-        return send_file(path, as_attachment=True, download_name=name)
-
     @app.route('/')
     def home():
-        return render_template('index.html')
+        return render_template('index.html', server_mode=SERVER_MODE)
 
-    @app.route('/api/select_folder', methods=['POST'])
-    def api_flask_select_folder():
-        result = api_system.select_folder()
-        return jsonify(result)
+    @app.route('/api/app_info', methods=['GET'])
+    def api_app_info():
+        return jsonify({"server_mode": SERVER_MODE, "media_root": MEDIA_ROOT, "version": APP_VERSION,
+                        "user": session.get('user') if SERVER_MODE else None})
 
+    # ---------------- Settings ----------------
     @app.route('/api/get_settings', methods=['GET'])
-    def api_flask_get_settings():
+    def api_get_settings():
         return jsonify(api_system.get_settings())
 
     @app.route('/api/save_settings', methods=['POST'])
-    def api_flask_save_settings():
-        data = request.json
+    def api_save_settings():
+        data = dict(api_system.get_settings(), **body())
+        data.pop('library_folders', None)
+        data['library_folders'] = load_config().get('library_folders', [])
         api_system.save_settings(data)
-        return jsonify({"status": "success"})
+        return jsonify({"success": True})
 
-    @app.route('/api/process_queue', methods=['POST'])
-    def api_flask_process_queue():
-        data = request.json
-        queue_data = data.get('queue', [])
-        folder = data.get('folder', '')
-        api_system.process_queue(queue_data, folder)
-        return jsonify({"status": "success"})
+    @app.route('/api/library/folders', methods=['GET', 'POST'])
+    def api_library_folders():
+        if request.method == 'POST':
+            return jsonify(api_system.set_library_folders(body().get('folders', [])))
+        return jsonify({"success": True, "folders": api_system.get_library_folders()})
 
-    @app.route('/api/get_subfolders', methods=['POST'])
-    def api_flask_get_subfolders():
-        data = request.get_json(force=True, silent=True) or {}
-        return jsonify(api_system.get_subfolders(data.get('folder', '')))
+    @app.route('/api/select_folder', methods=['POST'])
+    def api_select_folder():
+        return jsonify(api_system.select_folder())
 
-    @app.route('/api/jellyfin/resolve_item', methods=['POST'])
-    def api_flask_resolve_jellyfin_item():
-        data = request.get_json(force=True, silent=True) or {}
-        return jsonify(api_system.resolve_jellyfin_item(data.get('item_id', '')))
+    @app.route('/api/browse_folders', methods=['POST'])
+    def api_browse_folders():
+        return jsonify(api_system.browse_media_folders(body().get('folder')))
+
+    @app.route('/api/suggest_folders', methods=['POST'])
+    def api_suggest_folders():
+        return jsonify(api_system.suggest_media_folders(body().get('text', '')))
+
+    @app.route('/api/test_jellyfin', methods=['POST'])
+    def api_test_jellyfin():
+        data = body()
+        return jsonify(api_system.test_jellyfin(data.get('url', ''), data.get('api_key', '')))
 
     @app.route('/api/jellyfin/install_buttons', methods=['POST'])
-    def api_flask_install_jellyfin_buttons():
+    def api_install_jellyfin_buttons():
         return jsonify(api_system.install_jellyfin_buttons())
 
     @app.route('/jellyfin/themarr-buttons.js')
@@ -148,263 +126,184 @@ def register_routes(app, api_system):
         # The script ready to paste into JavaScript Injector by hand
         return api_system.jellyfin_buttons_script(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    @app.route('/api/status', methods=['GET'])
-    def api_flask_status():
-        return jsonify(api_system.get_status())
+    # ---------------- Library ----------------
+    @app.route('/api/library', methods=['GET'])
+    def api_library():
+        return jsonify(api_system.library_overview())
 
-    @app.route('/api/test_jellyfin', methods=['POST'])
-    def api_flask_test_jellyfin():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            
-            url = data.get('url', '')
-            api_key = data.get('api_key', data.get('api', '')) 
-            
-            print(f"\n[RECEIVED FROM BROWSER] URL: {url} | API: {'*' * 8 if api_key else '(empty)'}")
-            
-            result = api_system.test_jellyfin(url, api_key)
-            return jsonify(result)
-            
-        except Exception as e:
-            return jsonify({"status": "error", "message": f"❌ Flask Route Error: {str(e)}"})
-        
-    @app.route('/api/delete_music_folder', methods=['POST'])
-    def api_flask_delete_music():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            folder = data.get('folder', '')
-            scope = data.get('scope', 'single')
-            selected_folders = data.get('selectedFolders', [])
+    @app.route('/api/media', methods=['POST'])
+    def api_media():
+        return jsonify(api_system.media_details(body().get('path', '')))
 
-            print(f"\n[RECEIVED FROM BROWSER] Delete files in: {folder} | Scope: {scope}")
+    @app.route('/api/media/action', methods=['POST'])
+    def api_media_action():
+        data = body()
+        return jsonify(api_system.run_media_action(data.get('folders', []), data.get('action', '')))
 
-            result = api_system.delete_music_folder(folder, scope, selected_folders)
-            return jsonify(result)
-            
-        except Exception as e:
-            print(f"[FLASK ERROR] Delete failed: {e}")
-            return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
+    @app.route('/api/jellyfin/resolve_item', methods=['POST'])
+    def api_resolve_jellyfin_item():
+        return jsonify(api_system.resolve_jellyfin_item(body().get('item_id', '')))
 
-    @app.route('/api/enhance_local_music', methods=['POST'])
-    def api_flask_enhance_music():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            
-            folder = data.get('folder', '')
-            scope = data.get('scope', 'single')
-            lufs = data.get('lufs', '-24')
-            options = data.get('options', None)
-            selected_folders = data.get('selectedFolders', [])
-
-            print(f"\n[RECEIVED FROM BROWSER] Enhance - Folder: {folder} | Scope: {scope} | LUFS: {lufs} | Options: {options}")
-
-            result = api_system.enhance_local_music(folder, scope, lufs, options, selected_folders)
-            return jsonify(result)
-            
-        except Exception as e:
-            print(f"[FLASK ERROR] Enhance failed: {e}")
-            return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
-        
-    @app.route('/api/retry_item', methods=['POST'])
-    def api_flask_retry_item():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            index = data.get('index')
-            music = data.get('music')
-            folder = data.get('folder', '')
-            
-            api_system.retry_single_item(index, music, folder)
-            return jsonify({"status": "success"})
-        except Exception as e:
-            print(f"[FLASK ERROR] Retry item failed: {e}")
-            return jsonify({"status": "error", "message": f"❌ Server Error: {str(e)}"})
-        
-    @app.route('/api/search_youtube', methods=['POST'])
-    def api_flask_search_youtube():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            query = data.get('query', '')
-            
-            print(f"\n[RECEIVED FROM BROWSER] YouTube Search Query: {query}")
-            
-            result = api_system.search_youtube(query)
-            return jsonify(result)
-            
-        except Exception as e:
-            print(f"[FLASK ERROR] YouTube Search failed: {e}")
-            return jsonify([])
-
-    @app.route('/api/get_stream_info', methods=['POST'])
-    def get_stream_info():
-        data = request.json or {}
-        url = data.get('url')
-        result = api_system.get_stream_info(url)
-        return jsonify(result)
-
-    @app.route('/api/library/list', methods=['POST'])
-    def get_local_library():
-        data = request.json or {}
-        base_path = data.get('base_path', '')
-        scope = data.get('scope', 'all')
-        selected_folders = data.get('selected_folders', [])
-        
-        result = api_system.list_local_library(base_path, scope, selected_folders)
-        return jsonify(result)
+    @app.route('/api/jellyfin/image/<item_id>')
+    def api_jellyfin_image(item_id):
+        if not re.fullmatch(r'[0-9a-fA-F]{32}', item_id):
+            return "Invalid item", 400
+        image = api_system.jellyfin_image(item_id)
+        if not image:
+            return "No image", 404
+        response = make_response(image[0])
+        response.headers['Content-Type'] = image[1]
+        response.headers['Cache-Control'] = 'private, max-age=86400'
+        return response
 
     @app.route('/api/library/stream')
     def stream_local_file():
         file_path = request.args.get('path')
         if not file_path or not os.path.exists(file_path):
             return "File not found", 404
-        if SERVER_MODE and not is_theme_file(file_path):
+        if not is_theme_file(file_path):
             return "Only theme files can be streamed", 403
         check_media_read(file_path)
-
         return send_file(file_path, mimetype="audio/mpeg")
 
     @app.route('/api/library/process', methods=['POST'])
     def process_library_track():
-        data = request.json or {}
-        file_path = data.get('file_path', '')
-        new_name = data.get('new_name', '')
-        normalize = data.get('normalize', True)
-        fades = data.get('fades', True)
-        tag = data.get('tag', True)
+        data = body()
         start_time = data.get('startTime', '')
         end_time = data.get('endTime', '')
+        normalize = data.get('normalize', True)
+        fades = data.get('fades', True)
 
         config = load_config()
-        target_lufs = float(config.get('lufs', -24))
-        
+        fx = config.get('audio_fx', {})
         audio_effects = {
             "enabled": fades,
-            "remove_silence": False if (start_time or end_time) else config.get('audio_fx', {}).get('remove_silence', False),
-            "fade_in": float(config.get('audio_fx', {}).get('fade_in', 0)) if fades else 0,
-            "fade_out": float(config.get('audio_fx', {}).get('fade_out', 0)) if fades else 0,
-            "start_time": start_time if start_time else None,
-            "end_time": end_time if end_time else None
+            "remove_silence": False if (start_time or end_time) else (fades and fx.get('remove_silence', False)),
+            "fade_in": float(fx.get('fade_in', 0)) if fades else 0,
+            "fade_out": float(fx.get('fade_out', 0)) if fades else 0,
+            "start_time": start_time or None,
+            "end_time": end_time or None
         }
-        
-        result = api_system.process_local_file(
-            file_path=file_path,
-            target_lufs=target_lufs,
+        return jsonify(api_system.process_local_file(
+            file_path=data.get('file_path', ''),
+            target_lufs=float(config.get('lufs', -24)),
             audio_effects=audio_effects,
             normalize_enabled=normalize,
-            tag_enabled=tag,
-            new_name=new_name
-        )
-        return jsonify(result)
+            tag_enabled=data.get('tag', True),
+        ))
+
+    @app.route('/api/library/rename', methods=['POST'])
+    def rename_library_track():
+        data = body()
+        return jsonify(api_system.rename_track(data.get('file_path', ''), data.get('new_name', '')))
+
+    @app.route('/api/library/retag', methods=['POST'])
+    def retag_library_track():
+        return jsonify(api_system.retag_track(body().get('file_path', '')))
 
     @app.route('/api/library/delete', methods=['POST'])
     def delete_library_track():
-        data = request.json or {}
-        file_path = data.get('file_path', '')
+        file_path = body().get('file_path', '')
         if not file_path or not os.path.exists(file_path):
             return jsonify({"success": False, "message": "File not found."})
-
+        if not is_theme_file(file_path):
+            return jsonify({"success": False, "message": "Only theme files can be deleted."})
         check_theme_write(file_path, "delete")
-        try:
-            os.remove(file_path)
-            return jsonify({"success": True, "message": "File deleted."})
-        except Exception as e:
-            return jsonify({"success": False, "message": str(e)})
+        os.remove(file_path)
+        folder = os.path.dirname(file_path)
+        if os.path.basename(folder).lower() == 'theme-music' and not os.listdir(folder):
+            os.rmdir(folder)
+        print(f"[LIBRARY] 🗑️ Deleted {file_path}")
+        return jsonify({"success": True, "message": "Theme deleted."})
 
-    @app.route('/api/library/backup/export', methods=['POST'])
-    def api_flask_export_backup():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            base_path = data.get('base_path', '')
-            scope = data.get('scope', 'all')
-            selected_folders = data.get('selected_folders', [])
-            
-            result = api_system.export_media_backup(
-                base_path=base_path,
-                scope=scope,
-                selected_folders=selected_folders
-            )
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Export failed: {e}")
-            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
+    # ---------------- YouTube ----------------
+    @app.route('/api/search_youtube', methods=['POST'])
+    def api_search_youtube():
+        return jsonify(api_system.search_youtube(body().get('query', '')))
 
-    @app.route('/api/library/backup/select_file', methods=['POST'])
-    def api_flask_select_backup_file():
-        try:
-            result = api_system.select_backup_file()
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Select backup file failed: {e}")
-            return jsonify({"success": False, "file_path": ""})
-
-    @app.route('/api/library/backup/analyze', methods=['POST'])
-    def api_flask_analyze_backup():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            zip_path = data.get('zip_path', '')
-            base_path = data.get('base_path', '')
-            
-            result = api_system.analyze_backup(
-                zip_path=zip_path,
-                base_path=base_path
-            )
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Analyze backup failed: {e}")
-            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
-
-    @app.route('/api/library/backup/finalize', methods=['POST'])
-    def api_flask_finalize_backup():
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-            temp_import_id = data.get('temp_import_id', '')
-            base_path = data.get('base_path', '')
-            decision = data.get('decision', 'cancel')
-            missing_folders = data.get('missing_folders', [])
-            
-            result = api_system.finalize_backup_import(
-                temp_import_id=temp_import_id,
-                base_path=base_path,
-                decision=decision,
-                missing_folders=missing_folders
-            )
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Finalize backup failed: {e}")
-            return jsonify({"success": False, "message": f"Server error: {str(e)}"})
-
-    @app.route('/api/library/assistant/scan', methods=['POST'])
-    def api_flask_assistant_scan():
-        try:
-            data = request.json or {}
-            base_path = data.get('base_path', '')
-            scope = data.get('scope', 'all')
-            selected_folders = data.get('selected_folders', [])
-            result = api_system.scan_missing_themes(base_path, scope, selected_folders)
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Assistant scan failed: {e}")
-            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})
+    @app.route('/api/get_stream_info', methods=['POST'])
+    def api_stream_info():
+        return jsonify(api_system.get_stream_info(body().get('url')))
 
     @app.route('/api/library/assistant/suggestions', methods=['POST'])
-    def api_flask_assistant_suggestions():
-        try:
-            data = request.json or {}
-            folder_name = data.get('folder_name', '')
-            result = api_system.get_media_theme_suggestions(folder_name, data.get('folder_path'))
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Assistant suggestions failed: {e}")
-            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})
+    def api_assistant_suggestions():
+        data = body()
+        return jsonify(api_system.get_media_theme_suggestions(data.get('folder_name', ''), data.get('folder_path')))
 
-    @app.route('/api/library/assistant/download', methods=['POST'])
-    def api_flask_assistant_download():
-        try:
-            data = request.json or {}
-            download_list = data.get('download_list', [])
-            base_folder = data.get('base_folder', '')
-            options = data.get('options', {})
-            result = api_system.process_assistant_downloads(download_list, base_folder, options)
-            return jsonify(result)
-        except Exception as e:
-            print(f"[FLASK ERROR] Assistant download failed: {e}")
-            return jsonify({"success": False, "message": f"❌ Server Error: {str(e)}"})
+    # ---------------- Queue and activity ----------------
+    @app.route('/api/queue', methods=['GET'])
+    def api_queue():
+        return jsonify(api_system.queue_list())
+
+    @app.route('/api/queue/add', methods=['POST'])
+    def api_queue_add():
+        data = body()
+        return jsonify(api_system.queue_add(data.get('media_folder', ''), data.get('items', [])))
+
+    @app.route('/api/queue/remove', methods=['POST'])
+    def api_queue_remove():
+        return jsonify(api_system.queue_remove(body().get('id')))
+
+    @app.route('/api/queue/retry', methods=['POST'])
+    def api_queue_retry():
+        return jsonify(api_system.queue_retry(body().get('id')))
+
+    @app.route('/api/queue/clear', methods=['POST'])
+    def api_queue_clear():
+        return jsonify(api_system.queue_clear_finished())
+
+    @app.route('/api/queue/pause', methods=['POST'])
+    def api_queue_pause():
+        return jsonify(api_system.queue_pause(body().get('paused', True)))
+
+    @app.route('/api/status', methods=['GET'])
+    def api_status():
+        return jsonify(api_system.get_status())
+
+    # ---------------- Backup ----------------
+    @app.route('/api/library/backup/export', methods=['POST'])
+    def api_export_backup():
+        return jsonify(api_system.export_media_backup(base_path=body().get('base_path', ''), scope='all'))
+
+    @app.route('/api/library/backup/download')
+    def api_download_backup():
+        name = os.path.basename(request.args.get('name', ''))
+        path = os.path.join(BACKUP_DIR, name)
+        if not re.fullmatch(r'Themarr_Backup_\d{8}_\d{6}\.zip', name) or not os.path.isfile(path):
+            return "Backup not found", 404
+        return send_file(path, as_attachment=True, download_name=name)
+
+    @app.route('/api/library/backup/select_file', methods=['POST'])
+    def api_select_backup_file():
+        return jsonify(api_system.select_backup_file())
+
+    @app.route('/api/library/backup/upload', methods=['POST'])
+    def api_upload_backup():
+        upload = request.files.get('file')
+        if not upload or not upload.filename.lower().endswith('.zip'):
+            return jsonify({"success": False, "message": "Please choose a .zip backup file."})
+        return jsonify({"success": True, "file_path": save_uploaded_backup(upload)})
+
+    @app.route('/api/library/backup/analyze', methods=['POST'])
+    def api_analyze_backup():
+        data = body()
+        return jsonify(api_system.analyze_backup(zip_path=data.get('zip_path', ''), base_path=data.get('base_path', '')))
+
+    @app.route('/api/library/backup/finalize', methods=['POST'])
+    def api_finalize_backup():
+        data = body()
+        return jsonify(api_system.finalize_backup_import(
+            temp_import_id=data.get('temp_import_id', ''),
+            base_path=data.get('base_path', ''),
+            decision=data.get('decision', 'cancel'),
+            missing_folders=data.get('missing_folders', [])
+        ))
+
+    @app.errorhandler(Exception)
+    def unexpected_error(error):
+        if isinstance(error, HTTPException):
+            return error
+        print(f"[SERVER] ❌ {request.path}: {error}")
+        if request.path.startswith('/api/'):
+            return jsonify({"success": False, "status": "error", "message": f"Server error: {error}"}), 500
+        return "Server error", 500

@@ -16,11 +16,12 @@ except ImportError:  # headless server: no native windows or dialogs
     webview = None
 
 from core.config import load_config, save_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, PATH_MAP, PUBLIC_URL, BUNDLE_DIR
-from core.safety import check_theme_write, check_media_read, is_theme_file, is_season_folder_name, theme_files_only, UnsafeMediaOperation
+from core.safety import check_theme_write, check_media_read, is_season_folder_name, theme_files_only, UnsafeMediaOperation
 from core.logger import log_queue
 from core.audio import download_music, normalize_and_save, normalize_audio_ffmpeg, inject_mp3_metadata, get_streaming_url
 from core.jellyfin import fetch_jellyfin_data, download_jellyfin_image, fetch_jellyfin_season_image, find_jellyfin_item, get_library_index, match_media_folder, local_media_folder, install_jellyfin_buttons, refresh_jellyfin_media
 from core.files import generate_destination_path, move_loose_episodes, clean_search_name, safe_move
+from core.jobs import ThemeQueue
 
 global_state = {
     "is_processing": False,
@@ -282,6 +283,103 @@ def _count_theme_files(folder):
                 count += _count_mp3(os.path.join(path, 'theme-music'))
     return count
 
+MEDIA_ACTIONS = {
+    "normalize": "Normalizing",
+    "fx": "Applying audio effects to",
+    "retag": "Writing tags for",
+    "organize": "Organizing",
+    "remove": "Removing themes from",
+}
+
+def theme_files_in(folder):
+    """Theme files of a media folder: theme.mp3 and theme-music/*.mp3, its own and its seasons'"""
+    return theme_files_only([
+        os.path.join(root, file)
+        for root, _, files in os.walk(folder)
+        for file in files if file.lower().endswith('.mp3')
+    ])
+
+def remove_theme_files(folder):
+    """Deletes the theme files of a media folder and the theme-music folders left empty. Nothing else"""
+    removed = 0
+    for path in theme_files_in(folder):
+        check_theme_write(path, "delete")
+        os.remove(path)
+        print(f"[CLEANUP] 🗑️ Removed: {os.path.relpath(path, folder)}")
+        removed += 1
+    for root, subfolders, _ in os.walk(folder, topdown=False):
+        for sub in subfolders:
+            sub_path = os.path.join(root, sub)
+            if sub.lower() == 'theme-music' and not os.listdir(sub_path):
+                os.rmdir(sub_path)
+    return removed
+
+def _media_entry(media_path):
+    """One media folder with its theme tracks: theme.mp3, theme-music/ and each season's theme-music/"""
+    folder = os.path.basename(media_path)
+    tracks = []
+    single_theme_path = os.path.join(media_path, "theme.mp3")
+    if os.path.exists(single_theme_path):
+        tracks.append(_track_entry(single_theme_path, "theme.mp3", "Main Theme (Single)", f"theme.mp3 in {folder}"))
+
+    tracks += _theme_folder_tracks(os.path.join(media_path, "theme-music"), "Main Theme (Folder)", "root theme-music")
+
+    try:
+        for subitem in sorted(os.listdir(media_path), key=str.lower):
+            subitem_path = os.path.join(media_path, subitem)
+            if os.path.isdir(subitem_path) and subitem.lower() != 'theme-music':
+                tracks += _theme_folder_tracks(os.path.join(subitem_path, "theme-music"), subitem, "season track")
+    except Exception as e:
+        print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
+
+    return {"media_name": folder, "folder_path": media_path, "tracks": tracks}
+
+# ----------------------------------------------------------------------
+# Download queue workers
+# ----------------------------------------------------------------------
+def _process_queue_item(item, set_stage):
+    downloaded_file = None
+    try:
+        set_stage("Downloading")
+        downloaded_file = _download_with_retry(item['link'], "[QUEUE]", item['name'])
+
+        set_stage("Processing")
+        destination = item.get('destination') or 'Main Theme'
+        season = None if destination == 'Main Theme' else destination
+        final_path = generate_destination_path(item['media_folder'], 'season' if season else 'main', item['name'],
+                                               season, multiple_main=item.get('multi_main', False))
+        effects = item.get('audio_fx')
+        if effects is None:
+            effects = load_config().get("audio_fx", {})
+        normalize_and_save(downloaded_file, final_path, item['lufs'], effects,
+                           start_time=item.get('startTime'), end_time=item.get('endTime'),
+                           normalize_enabled=item.get('normalize', True))
+        print(f"[SUCCESS] {item['name']} saved for {item['media_name']}.")
+    finally:
+        if downloaded_file and os.path.exists(downloaded_file):
+            try:
+                os.remove(downloaded_file)
+            except Exception as e:
+                print(f"[WARNING] Could not delete temporary file: {e}")
+
+def _finish_media(media_folder, finished_items):
+    """Once per media after its queued themes: loose episodes into the season used, tags and covers, Jellyfin rescan"""
+    for season in {i['destination'] for i in finished_items if i.get('destination') != 'Main Theme'}:
+        move_loose_episodes(media_folder, season)
+    if any(i.get('tag', True) for i in finished_items):
+        process_folder_artwork(media_folder, os.path.basename(media_folder), _artwork_config())
+    _refresh_jellyfin(media_folder)
+
+_theme_queue = None
+_theme_queue_lock = threading.Lock()
+
+def theme_queue():
+    global _theme_queue
+    with _theme_queue_lock:
+        if _theme_queue is None:
+            _theme_queue = ThemeQueue(_process_queue_item, _finish_media)
+        return _theme_queue
+
 def _powershell_dialog(script):
     res = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
@@ -386,13 +484,6 @@ class Api:
         matches = sorted((n for n in names if n.casefold().startswith(fragment)), key=str.lower)[:15]
         return {"success": True, "suggestions": [os.path.join(base, n) for n in matches]}
 
-    def select_server_folder(self, folder):
-        """Chosen in the folder browser; same response shape as select_folder"""
-        check_media_read(folder)
-        if not folder or not os.path.isdir(folder):
-            return {"success": False, "path": "", "seasons": [], "message": "Folder not found."}
-        return {"success": True, "path": os.path.realpath(folder), "seasons": _list_season_folders(folder)}
-
     def resolve_jellyfin_item(self, item_id):
         """Media folder of a Jellyfin item, in the same shape as select_folder"""
         config = load_config()
@@ -412,45 +503,6 @@ class Api:
 
         print(f"[JELLYFIN] 🔗 Opened from Jellyfin: {item.get('Name')} -> {folder}")
         return {"success": True, "path": folder, "seasons": _list_season_folders(folder), "name": item.get("Name")}
-
-    def _resolve_smart_folders(self, folder, batch_mode):
-        if not folder: 
-            return folder
-        
-        current_folder = os.path.normpath(folder)
-        
-        for _ in range(3):
-            name = os.path.basename(current_folder).lower()
-            if "season" in name or "theme" in name or "main" in name:
-                current_folder = os.path.dirname(current_folder)
-            else:
-                break
-                
-        media_folder = current_folder
-        
-        if not batch_mode:
-            return media_folder
-        else:
-            is_media = False
-            try:
-                for item in os.listdir(media_folder):
-                    item_lower = item.lower()
-                    if item_lower == "theme-music" or item_lower.startswith("season"):
-                        is_media = True
-                        break
-                    if os.path.isfile(os.path.join(media_folder, item)) and item_lower.endswith(('.mkv', '.mp4', '.avi', '.mp3')):
-                        is_media = True
-                        break
-            except:
-                pass
-                
-            if is_media:
-                parent_folder = os.path.dirname(media_folder)
-                if os.path.ismount(parent_folder) or len(parent_folder) <= 3:
-                    return media_folder
-                return parent_folder
-            else:
-                return media_folder
 
     def _auto_organize_single_season(self, media_folder):
         try:
@@ -502,170 +554,234 @@ class Api:
         except Exception as e:
             print(f"[AUTO-ORGANIZE] ❌ Error organizing folder {media_folder}: {e}")
 
-    def enhance_local_music(self, target_folder, scope, target_lufs, options=None, selected_folders=None):
-        check_media_read(target_folder or MEDIA_ROOT or '.')
-        if options is None:
-            options = {"normalize": True, "metadata": True, "organize": True}
-            
-        if not target_folder or not os.path.exists(target_folder):
-            return {"status": "error", "message": "Invalid directory."}
-        
-        is_batch = (scope == 'all' or scope == 'selected')
-        
-        if is_batch:
-            target_folder = self._resolve_smart_folders(target_folder, is_batch)
-            
-        global_state["is_processing"] = True
-        global_state["percentage"] = 0
-        global_state["statusText"] = "Starting Enhancement..."
-        global_state["percentageText"] = "0%"
+    # ------------------------------------------------------------------
+    # Library: folders, media list and media page
+    # ------------------------------------------------------------------
+    def get_library_folders(self):
+        """Library folders from Settings. On the server, every folder under the media root until some are chosen"""
+        folders = [f for f in load_config().get("library_folders", []) if f and os.path.isdir(f)]
+        if not folders and SERVER_MODE and MEDIA_ROOT and os.path.isdir(MEDIA_ROOT):
+            folders = sorted((os.path.join(MEDIA_ROOT, n) for n in os.listdir(MEDIA_ROOT)
+                              if os.path.isdir(os.path.join(MEDIA_ROOT, n)) and not n.startswith('.')), key=str.lower)
+        return folders
 
-        _start_background(self._execute_enhance_thread, target_folder, scope, target_lufs, options, selected_folders)
-        
-        return {"status": "success", "message": "Enhancement started in background!"}
+    def set_library_folders(self, folders):
+        clean = []
+        for folder in folders or []:
+            folder = os.path.realpath(str(folder))
+            check_media_read(folder)
+            if not os.path.isdir(folder):
+                return {"success": False, "message": f"Folder not found: {folder}"}
+            # On the server a library is /data/<library>: media folders must sit right below it
+            if SERVER_MODE and os.path.dirname(folder) != MEDIA_ROOT:
+                return {"success": False, "message": f"Pick a library folder directly under {MEDIA_ROOT}, such as {MEDIA_ROOT}/TV."}
+            if folder not in clean:
+                clean.append(folder)
+        config = load_config()
+        config["library_folders"] = clean
+        save_config(config)
+        return {"success": True, "folders": self.get_library_folders()}
 
-    def _execute_enhance_thread(self, target_folder, scope, target_lufs, options, selected_folders):
+    def _jellyfin_index(self):
+        config = load_config()
+        if config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api"):
+            return get_library_index(config["jelly_url"], config["jelly_api"])
+        return []
+
+    @staticmethod
+    def _jellyfin_info(index, folder):
+        item = match_media_folder(index, folder) if index else None
+        if not item:
+            return None
+        return {"id": item.get("Id"), "name": item.get("Name"), "year": item.get("ProductionYear"), "type": item.get("Type")}
+
+    def library_overview(self):
+        """Every media folder of every library folder, with its themes and its Jellyfin item"""
+        index = self._jellyfin_index()
+        libraries, media = [], []
+        for root in self.get_library_folders():
+            check_media_read(root)
+            libraries.append({"name": os.path.basename(root) or root, "path": root})
+            try:
+                names = sorted((n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith('.')),
+                               key=str.lower)
+            except OSError as e:
+                print(f"[LIBRARY] Could not read {root}: {e}")
+                continue
+            for name in names:
+                entry = _media_entry(os.path.join(root, name))
+                entry.update(library=os.path.basename(root), jellyfin=self._jellyfin_info(index, entry["folder_path"]))
+                media.append(entry)
+        return {"success": True, "libraries": libraries, "media": media}
+
+    def media_details(self, folder):
+        folder = os.path.realpath(folder or '')
+        check_media_read(folder)
+        if not os.path.isdir(folder):
+            return {"success": False, "message": "This media folder no longer exists."}
+        entry = _media_entry(folder)
+        entry.update(library=os.path.basename(os.path.dirname(folder)), seasons=_list_season_folders(folder),
+                     jellyfin=self._jellyfin_info(self._jellyfin_index(), folder))
+        return {"success": True, "media": entry}
+
+    def jellyfin_image(self, item_id):
+        """Poster of a Jellyfin item, fetched with the server's API key so the browser never needs it"""
+        config = load_config()
+        if not (config.get("jelly_check") and config.get("jelly_url") and config.get("jelly_api")):
+            return None
         try:
-            print("\n=======================================================")
-            print("[ENHANCE] Starting audio enhancement process...")
-            print(f"[ENHANCE] Scope Mode: {scope}")
-            print(f"[ENHANCE] Target Volume: {target_lufs} LUFS")
-            print("=======================================================\n")
-
-            affected_files = 0
-            folders_to_process = []
-            
-            if scope == 'all':
-                for item in os.listdir(target_folder):
-                    item_path = os.path.join(target_folder, item)
-                    if os.path.isdir(item_path):
-                        folders_to_process.append(item_path)
-
-            elif scope == 'selected' and selected_folders:
-                for folder_name in selected_folders:
-                    item_path = os.path.join(target_folder, folder_name)
-                    if os.path.isdir(item_path):
-                        folders_to_process.append(item_path)
-            else:
-                folders_to_process.append(target_folder)
-
-            current_config = self.get_settings() 
-            audio_effects = current_config.get("audio_fx", {})
-            total_folders = len(folders_to_process)
-            
-            for i, media_folder in enumerate(folders_to_process):
-                media_name = os.path.basename(media_folder)
-                
-                percentage = int((i / total_folders) * 100) if total_folders > 0 else 0
-                global_state["percentage"] = percentage
-                global_state["statusText"] = f"Enhancing: {media_name}"
-                global_state["percentageText"] = f"{i}/{total_folders} ({percentage}%)"
-                
-                if options.get("organize", True):
-                    self._auto_organize_single_season(media_folder)
-                
-                if not options.get("normalize", True) and not options.get("metadata", True) and not options.get("audio_fx", False):
-                    continue
-
-                mp3s_in_folder = theme_files_only([
-                    os.path.join(root, file)
-                    for root, _, files in os.walk(media_folder)
-                    for file in files if file.lower().endswith('.mp3')
-                ])
-                
-                if not mp3s_in_folder:
-                    continue 
-                
-                print(f"\n[ENHANCE] ✨ Enhancing audio in folder: {media_name}")
-                normalize_active = options.get("normalize", True)
-                fx_active = options.get("audio_fx", False)
-                
-                for mp3 in mp3s_in_folder:
-                    if normalize_active or fx_active:
-                        print(f"[ENHANCE] 🎚️ Processing Audio: {os.path.basename(mp3)}")
-                        effs = audio_effects if fx_active else {}
-                        if normalize_audio_ffmpeg(mp3, target_lufs, effs, normalize_enabled=normalize_active):
-                            affected_files += 1
-                    else:
-                        affected_files += 1 
-                            
-                if options.get("metadata", True):
-                    process_folder_artwork(media_folder, media_name, _artwork_config())
-                
-            print("\n=======================================================")
-            print(f"[ENHANCE] Complete! {affected_files} file(s) modified/read.")
-            print("=======================================================\n")
-            
-            global_state["percentage"] = 100
-            global_state["statusText"] = "Enhancement Complete!"
-            global_state["percentageText"] = f"{total_folders}/{total_folders} (100%)"
-                
+            res = requests.get(f"{config['jelly_url'].rstrip('/')}/Items/{item_id}/Images/Primary",
+                               headers={"X-Emby-Token": config["jelly_api"]},
+                               params={"maxHeight": 450, "quality": 90}, timeout=10)
+            if res.status_code == 200 and res.headers.get('Content-Type', '').startswith('image/'):
+                return res.content, res.headers['Content-Type']
         except Exception as e:
-            print(f"\n[ENHANCE] ❌ Critical error: {e}")
-            global_state["statusText"] = f"Error: {str(e)}"
+            print(f"[JELLYFIN] ⚠️ Could not load the poster of {item_id}: {e}")
+        return None
+
+    def rename_track(self, file_path, new_name):
+        """Renames a theme file (never over another one) and writes the new title tag"""
+        new_name = (new_name or '').strip()
+        if not new_name.lower().endswith('.mp3'):
+            new_name += '.mp3'
+        for char in '|*?:"<>/\\':
+            new_name = new_name.replace(char, '-')
+        if not file_path or not os.path.isfile(file_path):
+            return {"success": False, "message": "Track not found."}
+        if new_name == '.mp3':
+            return {"success": False, "message": "Type a name for the track."}
+
+        new_path = os.path.join(os.path.dirname(file_path), new_name)
+        if os.path.basename(file_path) == new_name:
+            return {"success": True, "file_path": file_path}
+        # A case-only rename points to the same file on Windows and is allowed
+        if os.path.exists(new_path) and not os.path.samefile(file_path, new_path):
+            return {"success": False, "message": f"A track named '{new_name}' already exists here."}
+        check_theme_write(file_path, "rename")
+        check_theme_write(new_path, "rename")
+        os.rename(file_path, new_path)
+        print(f"[LIBRARY] Renamed '{os.path.basename(file_path)}' to '{new_name}'.")
+
+        self.retag_track(new_path)
+        return {"success": True, "file_path": new_path}
+
+    def retag_track(self, file_path):
+        """Writes title, album, genres and cover into one theme file, without re-encoding the audio"""
+        if not file_path or not os.path.isfile(file_path):
+            return {"success": False, "message": "Track not found."}
+        check_theme_write(file_path, "tag")
+        media_folder = _media_folder_of_track(file_path)
+        if not media_folder:
+            return {"success": False, "message": "This file is not in a theme folder."}
+        process_folder_artwork(media_folder, os.path.basename(media_folder), _artwork_config(), only_file=file_path)
+        return {"success": True, "message": "Tags written."}
+
+    # ------------------------------------------------------------------
+    # Bulk actions on media folders (Library selection and media page)
+    # ------------------------------------------------------------------
+    def run_media_action(self, folders, action):
+        """normalize, fx, retag, organize or remove, on explicit media folders. Only theme files are touched"""
+        if action not in MEDIA_ACTIONS:
+            return {"success": False, "message": "Unknown action."}
+        targets = []
+        for folder in folders or []:
+            folder = os.path.realpath(str(folder))
+            check_media_read(folder)
+            if os.path.isdir(folder):
+                targets.append(folder)
+        if not targets:
+            return {"success": False, "message": "No media selected."}
+        if global_state["is_processing"]:
+            return {"success": False, "message": "Another task is running. Try again when it finishes."}
+
+        global_state.update(is_processing=True, percentage=0, statusText=f"{MEDIA_ACTIONS[action]}...", percentageText="0%")
+        _start_background(self._media_action_thread, targets, action)
+        return {"success": True, "message": f"{MEDIA_ACTIONS[action]} {len(targets)} media..."}
+
+    def _media_action_thread(self, folders, action):
+        label = MEDIA_ACTIONS[action]
+        config = self.get_settings()
+        lufs = config.get("lufs", -24)
+        changed = 0
+        try:
+            print(f"\n[TASK] {label} {len(folders)} media folder(s)...")
+            for i, folder in enumerate(folders):
+                name = os.path.basename(folder)
+                percentage = int(i / len(folders) * 100)
+                global_state.update(percentage=percentage, statusText=f"{label}: {name}", percentageText=f"{i}/{len(folders)}")
+
+                if action == 'organize':
+                    self._auto_organize_single_season(folder)
+                elif action == 'remove':
+                    changed += remove_theme_files(folder)
+                elif action == 'retag':
+                    themes = theme_files_in(folder)
+                    if themes:
+                        process_folder_artwork(folder, name, _artwork_config())
+                        changed += len(themes)
+                else:
+                    effects = config.get("audio_fx", {}) if action == 'fx' else {}
+                    for mp3 in theme_files_in(folder):
+                        print(f"[TASK] 🎚️ {os.path.basename(mp3)}")
+                        normalize_audio_ffmpeg(mp3, lufs, effects, normalize_enabled=(action == 'normalize'))
+                        changed += 1
+
+            print(f"[TASK] Done: {label.lower()} finished ({changed} theme file(s)).\n")
+            global_state.update(percentage=100, statusText=f"{label} finished", percentageText=f"{len(folders)}/{len(folders)}")
+        except Exception as e:
+            print(f"\n[TASK] ❌ {label} stopped: {e}")
+            global_state["statusText"] = f"Error: {e}"
         finally:
             global_state["is_processing"] = False
-        
-    def delete_music_folder(self, root_folder, scope, selected_folders=None):
-        check_media_read(root_folder or MEDIA_ROOT or '.')
 
-        if not root_folder or not os.path.exists(root_folder):
-            return {"status": "error", "message": "Invalid or missing directory."}
-        
-        folders_to_process = []
-        mode_str = ""
+    # ------------------------------------------------------------------
+    # Download queue
+    # ------------------------------------------------------------------
+    def queue_add(self, media_folder, items):
+        media_folder = os.path.realpath(media_folder or '')
+        check_media_read(media_folder)
+        if not os.path.isdir(media_folder):
+            return {"success": False, "message": "This media folder no longer exists."}
 
-        if scope == 'all':
-            target = self._resolve_smart_folders(root_folder, True)
-            folders_to_process.append(target)
-            mode_str = "WHOLE LIBRARY"
-            
-        elif scope == 'selected' and selected_folders:
-            smart_root = self._resolve_smart_folders(root_folder, True)
-            for folder_name in selected_folders:
-                full_path = os.path.join(smart_root, folder_name)
-                if os.path.exists(full_path):
-                    folders_to_process.append(full_path)
-            mode_str = f"SELECTED MEDIA ({len(folders_to_process)} folders)"
-            
-        else:
-            target = self._resolve_smart_folders(root_folder, False)
-            folders_to_process.append(target)
-            mode_str = "CURRENT MEDIA FOLDER"
-    
-        deleted_count = 0
-        try:
-            print(f"\n=======================================================")
-            print(f"[CLEANUP] Starting audio cleanup")
-            print(f"[CLEANUP] Mode: {mode_str}")
-            print(f"=======================================================\n")
-            
-            for target_folder in folders_to_process:
-                print(f"[CLEANUP] Scanning folder: {target_folder}")
-                
-                for root, subfolders, files in os.walk(target_folder):
-                    for file in files:
-                        full_path = os.path.join(root, file)
-                        if is_theme_file(full_path):
-                            check_theme_write(full_path, "delete")
-                            os.remove(full_path)
-                            print(f"[CLEANUP] 🗑️ Removed: {file}")
-                            deleted_count += 1
-                
-                for root, subfolders, files in os.walk(target_folder, topdown=False):
-                    for subfolder in subfolders:
-                        if subfolder.lower() == 'theme-music':
-                            sub_path = os.path.join(root, subfolder)
-                            if not os.listdir(sub_path): 
-                                os.rmdir(sub_path)
-                                print(f"[CLEANUP] 📂 Removed empty folder: theme-music")
-                                
-            print(f"\n[CLEANUP] Done! {deleted_count} file(s) removed.")
-            return {"status": "success", "message": f"Cleaned up! {deleted_count} audio file(s) removed."}
-        
-        except Exception as e:
-            print(f"[CLEANUP] ❌ Error: {e}")
-            return {"status": "error", "message": f"Error during cleanup: {str(e)}"}
+        clean = []
+        for item in items or []:
+            link = str(item.get('link', '')).strip()
+            name = str(item.get('name', '')).strip()
+            destination = str(item.get('destination') or 'Main Theme')
+            if not link.startswith(('http://', 'https://')):
+                return {"success": False, "message": "Choose a YouTube video or paste its link."}
+            if not name:
+                return {"success": False, "message": "Give the theme a name."}
+            if destination != 'Main Theme' and (os.path.basename(destination) != destination or destination in ('.', '..')):
+                return {"success": False, "message": "Invalid destination."}
+            clean.append({
+                "link": link, "name": name, "destination": destination,
+                "lufs": item.get('lufs') if item.get('lufs') not in (None, '') else load_config().get("lufs", -24),
+                "audio_fx": item.get('audio_fx'),
+                "startTime": item.get('startTime') or None, "endTime": item.get('endTime') or None,
+                "normalize": item.get('normalize', True) is not False, "tag": item.get('tag', True) is not False,
+            })
+        if not clean:
+            return {"success": False, "message": "Nothing to add."}
+        ids = theme_queue().add(media_folder, clean)
+        return {"success": True, "ids": ids, "message": f"Added {len(ids)} theme(s) to the queue."}
+
+    def queue_list(self):
+        return theme_queue().snapshot()
+
+    def queue_remove(self, item_id):
+        return {"success": theme_queue().remove(item_id)}
+
+    def queue_retry(self, item_id):
+        return {"success": theme_queue().retry(item_id)}
+
+    def queue_clear_finished(self):
+        theme_queue().clear_finished()
+        return {"success": True}
+
+    def queue_pause(self, paused):
+        theme_queue().set_paused(paused)
+        return {"success": True, "paused": theme_queue().paused}
 
     def get_status(self):
         chunks = []
@@ -681,197 +797,6 @@ class Api:
             "item_statuses": global_state["item_statuses"]
         }
     
-    def retry_single_item(self, index, music, root_media_folder):
-        check_media_read(root_media_folder or MEDIA_ROOT or '.')
-        global_state["is_processing"] = True
-        global_state["item_statuses"][index] = "processing"
-        global_state["statusText"] = f"Retrying: {music.get('name')}..."
-        
-        _start_background(self._execute_single_retry_thread, index, music, root_media_folder)
-        return True
-
-    def _execute_single_retry_thread(self, index, music, root_media_folder):
-        current_config = self.get_settings()
-        audio_effects = current_config.get("audio_fx", {})
-        
-        link = music['link']
-        name = music.get('name')
-        destination = music.get('destination')
-        lufs = music['lufs']
-        has_multi_main = music.get('has_multi_main', False)
-
-        track_fx = music.get('audio_fx') or audio_effects
-        
-        print(f"\n[SYSTEM] Retrying single item: {name}...\n")
-        
-        downloaded_file = None
-        try:
-            downloaded_file = _download_with_retry(link, "[RETRY]", name)
-
-            global_state["statusText"] = f"Normalizing: {name}..."
-            
-            if "Season" in destination:
-                theme_type = "season"
-                temp_folder = destination
-            else:
-                theme_type = "main"
-                temp_folder = None
-
-            final_path = generate_destination_path(root_media_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-            
-            start_time = music.get('startTime', None)
-            end_time = music.get('endTime', None)
-            
-            normalize_and_save(
-                downloaded_file, 
-                final_path, 
-                lufs, 
-                track_fx, 
-                start_time=start_time, 
-                end_time=end_time
-            )
-            
-            if "Season" in destination:
-                move_loose_episodes(root_media_folder, destination)
-                
-            process_folder_artwork(root_media_folder, os.path.basename(root_media_folder), _artwork_config())
-            _refresh_jellyfin(root_media_folder)
-
-            global_state["item_statuses"][index] = "completed"
-            global_state["statusText"] = "Item processed successfully!"
-            print(f"[SUCCESS] Single retry for {name} completed!")
-            
-        except Exception as e:
-            print(f"\n[ERROR] Single retry failed for {name}: {str(e)}\n")
-            global_state["item_statuses"][index] = "error"
-            global_state["statusText"] = f"Failed to retry {name}"
-            
-        finally:
-            if downloaded_file and os.path.exists(downloaded_file):
-                try:
-                    os.remove(downloaded_file)
-                except Exception as e:
-                    print(f"[WARNING] Could not delete temporary file: {e}")
-            
-            if "processing" not in global_state["item_statuses"]:
-                global_state["is_processing"] = False
-
-    def process_queue(self, music_list, root_media_folder):
-        check_media_read(root_media_folder or MEDIA_ROOT or '.')
-        global_state["is_processing"] = True
-        global_state["percentage"] = 0
-        global_state["statusText"] = "Starting..."
-        global_state["percentageText"] = "0%"
-        global_state["item_statuses"] = ["waiting"] * len(music_list)
-
-        _start_background(self._execute_queue_thread, music_list, root_media_folder)
-        return True
-
-    def _execute_queue_thread(self, music_list, root_media_folder):
-        try:
-            self._run_queue(music_list, root_media_folder)
-        except Exception as e:
-            print(f"\n[ERROR] Queue stopped by an unexpected error: {e}\n")
-            global_state["statusText"] = f"Error: {str(e)}"
-        finally:
-            global_state["is_processing"] = False
-
-    def _run_queue(self, music_list, root_media_folder):
-        current_config = self.get_settings()
-        audio_effects = current_config.get("audio_fx", {})
-
-        total = len(music_list)
-
-        global_state["item_statuses"] = ["waiting"] * total
-        global_state["percentage"] = 0
-        global_state["is_processing"] = True
-        global_state["statusText"] = "Starting process..."
-        global_state["percentageText"] = f"0/{total} (0%)"
-
-        print(f"\n[SYSTEM] Starting queue with {total} items...\n")
-
-        main_count = sum(1 for m in music_list if m.get('destination') == 'Main Theme')
-        has_multi_main = main_count > 1
-        seasons_to_clean = set()
-
-        for i, music in enumerate(music_list):
-            link = music['link']
-            name = music.get('name')
-            destination = music.get('destination')
-            lufs = music['lufs']
-
-            track_fx = music.get('audio_fx') or audio_effects
-
-            percentage = int((i / total) * 100)
-            perc_text = f"{percentage}%" if i == 0 else f"{i}/{total} ({percentage}%)"
-
-            global_state["item_statuses"][i] = "processing"
-            global_state["percentage"] = percentage
-            global_state["statusText"] = f"Downloading: {name}..."
-            global_state["percentageText"] = perc_text
-
-            downloaded_file = None
-            try:
-                downloaded_file = _download_with_retry(link, "[RETRY]", name)
-
-                global_state["statusText"] = f"Normalizing: {name}..."
-
-                if "Season" in destination:
-                    theme_type = "season"
-                    temp_folder = destination
-                    seasons_to_clean.add(temp_folder)
-                else:
-                    theme_type = "main"
-                    temp_folder = None
-
-                final_path = generate_destination_path(root_media_folder, theme_type, name, temp_folder, multiple_main=has_multi_main)
-
-                normalize_and_save(
-                    downloaded_file,
-                    final_path,
-                    lufs,
-                    track_fx,
-                    start_time=music.get('startTime'),
-                    end_time=music.get('endTime')
-                )
-
-                global_state["item_statuses"][i] = "completed"
-                print(f"[SUCCESS] {name} finished successfully!")
-
-            except Exception as e:
-                print(f"\n[ERROR] Failed to process {name}: {str(e)}\n")
-                global_state["item_statuses"][i] = "error"
-
-            finally:
-                # GUARANTEED CLEANUP
-                if downloaded_file and os.path.exists(downloaded_file):
-                    try:
-                        os.remove(downloaded_file)
-                    except Exception as e:
-                        print(f"[WARNING] Could not delete temporary file: {e}")
-
-        if seasons_to_clean:
-            print("\n[SYSTEM] Starting Smart Cleanup on affected seasons...")
-            for temp in seasons_to_clean:
-                move_loose_episodes(root_media_folder, temp)
-
-        global_state["percentage"] = 99
-        global_state["statusText"] = "Applying Cover Arts..."
-        global_state["percentageText"] = "99%"
-
-        process_folder_artwork(root_media_folder, os.path.basename(root_media_folder), _artwork_config())
-
-        if "completed" in global_state["item_statuses"]:
-            _refresh_jellyfin(root_media_folder)
-
-        # Process complete!
-        global_state["percentage"] = 100
-        global_state["statusText"] = "All operations completed!"
-        global_state["percentageText"] = f"{total}/{total} (100%)"
-
-        print("\n[SYSTEM] Queue completed successfully! Waiting for new commands...")
-
-
     def test_jellyfin(self, url, api_key):
         try:
             import urllib3
@@ -919,29 +844,6 @@ class Api:
         save_config(data)
         return True
 
-    def get_subfolders(self, folder_path):
-        check_media_read(folder_path or MEDIA_ROOT or '.')
-        try:
-            if not folder_path or not os.path.exists(folder_path):
-                return {"status": "error", "folders": [], "selected_media": ""}
-            
-            root_folder = self._resolve_smart_folders(folder_path, True)
-            
-            subfolders = [f for f in os.listdir(root_folder) if os.path.isdir(os.path.join(root_folder, f))]
-            
-            selected_media = ""
-            if root_folder.lower() != folder_path.lower():
-                selected_media = os.path.basename(folder_path)
-                
-            return {
-                "status": "success", 
-                "folders": subfolders, 
-                "selected_media": selected_media
-            }
-        except Exception as e:
-            print(f"[ERROR] get_subfolders failed: {str(e)}")
-            return {"status": "error", "folders": [], "selected_media": ""}
-        
     def search_youtube(self, query):
         if not query or not query.strip():
             return []
@@ -1029,29 +931,8 @@ class Api:
                 if scope == "selected" and folder not in selected_folders:
                     continue
                     
-                media_path = os.path.join(real_root_path, folder)
-                tracks = []
-                
-                single_theme_path = os.path.join(media_path, "theme.mp3")
-                if os.path.exists(single_theme_path):
-                    tracks.append(_track_entry(single_theme_path, "theme.mp3", "Main Theme (Single)", f"theme.mp3 in {folder}"))
+                library_data.append(_media_entry(os.path.join(real_root_path, folder)))
 
-                tracks += _theme_folder_tracks(os.path.join(media_path, "theme-music"), "Main Theme (Folder)", "root theme-music")
-
-                try:
-                    for subitem in os.listdir(media_path):
-                        subitem_path = os.path.join(media_path, subitem)
-                        if os.path.isdir(subitem_path):
-                            tracks += _theme_folder_tracks(os.path.join(subitem_path, "theme-music"), subitem, "season track")
-                except Exception as e:
-                    print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
-
-                library_data.append({
-                    "media_name": folder,
-                    "folder_path": media_path,
-                    "tracks": tracks
-                })
-                
             library_data.sort(key=lambda x: x["media_name"].lower())
             return {"success": True, "library": library_data}
             
@@ -1271,28 +1152,6 @@ class Api:
             shutil.rmtree(temp_import_id, ignore_errors=True)
             return {"success": False, "message": str(e)}
 
-    def scan_missing_themes(self, base_path, scope="all", selected_folders=None):
-        check_media_read(base_path or MEDIA_ROOT or '.')
-        try:
-            library_res = self.list_local_library(base_path, "all", None)
-            if not library_res.get("success"):
-                return {"success": False, "message": library_res.get("message", "Failed to scan library.")}
-                
-            library_data = library_res["library"]
-            missing_media = []
-            
-            for item in library_data:
-                if len(item["tracks"]) == 0:
-                    missing_media.append({
-                        "folder_name": item["media_name"],
-                        "folder_path": item["folder_path"]
-                    })
-                    
-            return {"success": True, "missing_media": missing_media}
-        except Exception as e:
-            print(f"[ASSISTANT] Error scanning missing themes: {e}")
-            return {"success": False, "message": str(e)}
-
     def get_assistant_search_query(self, folder_name, folder_path=None):
         try:
             config = self.get_settings()
@@ -1355,87 +1214,3 @@ class Api:
         except Exception as e:
             print(f"[ASSISTANT] Error getting suggestions for {folder_name}: {e}")
             return {"success": False, "message": str(e)}
-
-    def process_assistant_downloads(self, download_list, base_folder, options=None):
-        for item in download_list:
-            check_media_read(item.get("folder_path") or MEDIA_ROOT or '.')
-        if global_state.get("is_processing", False):
-            return {"success": False, "message": "Themarr is currently processing another task. Please wait."}
-            
-        global_state["is_processing"] = True
-        global_state["percentage"] = 0
-        global_state["statusText"] = "Starting Assistant Downloads..."
-        global_state["percentageText"] = "0%"
-        
-        _start_background(self._execute_assistant_download_thread, download_list, base_folder, options or {})
-        return {"success": True, "message": "Assistant download started!"}
-
-    def _execute_assistant_download_thread(self, download_list, base_folder, options):
-        try:
-            current_config = self.get_settings()
-            normalize_enabled = options.get("normalize", True)
-            audio_effects = current_config.get("audio_fx", {}) if options.get("fades", True) else {}
-            tags_enabled = options.get("tags", True)
-            target_lufs = float(current_config.get("lufs", -24))
-            
-            total = len(download_list)
-            print(f"\n[ASSISTANT] Starting batch download of {total} items...\n")
-            
-            for i, item in enumerate(download_list):
-                folder_name = item["folder_name"]
-                folder_path = item["folder_path"]
-                track_name = item["track_name"]
-                youtube_url = item["youtube_url"]
-                
-                percentage = int((i / total) * 100)
-                global_state["percentage"] = percentage
-                global_state["statusText"] = f"Downloading theme for: {folder_name}"
-                global_state["percentageText"] = f"{i}/{total} ({percentage}%)"
-                
-                downloaded_file = None
-                try:
-                    downloaded_file = _download_with_retry(youtube_url, "[ASSISTANT]", folder_name)
-
-                    global_state["statusText"] = f"Normalizing theme for: {folder_name}"
-                    
-                    final_path = generate_destination_path(
-                        media_folder=folder_path,
-                        theme_type="main",
-                        custom_name=track_name,
-                        season_folder=None,
-                        multiple_main=False
-                    )
-                    
-                    normalize_and_save(
-                        downloaded_file,
-                        final_path,
-                        target_lufs,
-                        audio_effects,
-                        normalize_enabled=normalize_enabled
-                    )
-
-                    if tags_enabled:
-                        process_folder_artwork(folder_path, folder_name, _artwork_config())
-                    _refresh_jellyfin(folder_path)
-                    print(f"[ASSISTANT SUCCESS] Successfully applied theme for: {folder_name}")
-                    
-                except Exception as e:
-                    print(f"[ASSISTANT ERROR] Failed to process {folder_name}: {e}")
-                    
-                finally:
-                    if downloaded_file and os.path.exists(downloaded_file):
-                        try:
-                            os.remove(downloaded_file)
-                        except Exception as ex:
-                            print(f"[ASSISTANT WARNING] Could not remove temp file: {ex}")
-                            
-            global_state["percentage"] = 100
-            global_state["statusText"] = "Assistant downloads complete!"
-            global_state["percentageText"] = f"{total}/{total} (100%)"
-            print("\n[ASSISTANT] Batch download thread finished successfully.\n")
-            
-        except Exception as err:
-            print(f"[ASSISTANT] Critical thread error: {err}")
-            global_state["statusText"] = f"Error: {str(err)}"
-        finally:
-            global_state["is_processing"] = False
