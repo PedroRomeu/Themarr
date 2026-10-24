@@ -8,7 +8,7 @@ from werkzeug.exceptions import HTTPException
 
 from core.config import load_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, APP_VERSION
 from core.safety import UnsafeMediaOperation, check_media_read, check_theme_write, is_theme_file
-from api_controller import save_uploaded_backup
+from api_controller import save_uploaded_backup, local_cover
 
 PUBLIC_ENDPOINTS = {'login', 'static'}
 
@@ -155,6 +155,15 @@ def register_routes(app, api_system):
         response.headers['Content-Type'] = image[1]
         response.headers['Cache-Control'] = 'private, max-age=86400'
         return response
+
+    @app.route('/api/media/cover')
+    def api_media_cover():
+        folder = request.args.get('path', '')
+        check_media_read(folder or '.')
+        cover = local_cover(folder) if folder and os.path.isdir(folder) else None
+        if not cover:
+            return "No cover", 404
+        return send_file(cover, max_age=86400)
 
     @app.route('/api/library/stream')
     def stream_local_file():

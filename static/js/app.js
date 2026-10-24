@@ -160,9 +160,10 @@ function posterHtml(media, extraClass = '') {
     let hash = 0;
     for (const ch of media.media_name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
     const color = POSTER_COLORS[hash % POSTER_COLORS.length];
-    const image = media.jellyfin?.id
-        ? `<img src="/api/jellyfin/image/${media.jellyfin.id}" alt="" loading="lazy" onerror="this.remove()">`
-        : '';
+    // Jellyfin poster first, then artwork saved in the media folder (poster.jpg, folder.jpg, cover.jpg)
+    const src = media.jellyfin?.id ? `/api/jellyfin/image/${media.jellyfin.id}`
+        : media.has_cover ? `/api/media/cover?path=${encodeURIComponent(media.folder_path)}` : '';
+    const image = src ? `<img src="${src}" alt="" loading="lazy" onerror="this.remove()">` : '';
     return `<div class="poster ${extraClass}" style="background: linear-gradient(160deg, ${color}, #14141c)">
         <span class="poster-letter">${esc(name.trim()[0] || '?')}</span>${image}</div>`;
 }

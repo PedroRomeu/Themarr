@@ -28,7 +28,8 @@ App.pages.media = {
         const seasons = m.seasons;
         const mainTracks = m.tracks.filter(t => t.location_type.startsWith('Main Theme'));
         const pending = App.pendingFor(m.folder_path);
-        const backdrop = jf?.id ? `<img src="/api/jellyfin/image/${jf.id}" alt="" class="absolute inset-0 w-full h-full object-cover opacity-20 blur-2xl scale-110" onerror="this.remove()">` : '';
+        const art = jf?.id ? `/api/jellyfin/image/${jf.id}` : m.has_cover ? `/api/media/cover?path=${encodeURIComponent(m.folder_path)}` : '';
+        const backdrop = art ? `<img src="${art}" alt="" class="absolute inset-0 w-full h-full object-cover opacity-20 blur-2xl scale-110" onerror="this.remove()">` : '';
 
         view.innerHTML = `
             <div class="relative border-b border-line overflow-hidden">
@@ -43,7 +44,7 @@ App.pages.media = {
                             <div class="mt-1 text-muted text-xs flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <span>${esc(m.library)}${seasons.length ? ` · ${seasons.length} season folder${seasons.length > 1 ? 's' : ''}` : ''}</span>
                                 ${jf ? `<span class="flex items-center gap-1 text-accent-text">${icon('link', 'icon-sm')}Matched in Jellyfin</span>`
-                                     : `<span class="flex items-center gap-1 text-faint" title="Covers and official names come from Jellyfin">${icon('unlink', 'icon-sm')}Not found in Jellyfin</span>`}
+                                     : App.settings.jelly_check ? `<span class="flex items-center gap-1 text-faint" title="Covers and official names come from Jellyfin">${icon('unlink', 'icon-sm')}Not found in Jellyfin</span>` : ''}
                                 <span class="font-mono text-faint truncate" title="${esc(m.folder_path)}">${esc(m.folder_path)}</span>
                             </div>
                             <div class="mt-4 flex items-center gap-2">

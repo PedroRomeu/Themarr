@@ -140,13 +140,13 @@ App.pages.library = {
                 <td class="py-2.5 pl-2">${esc(mediaTitle(m))}${m.jellyfin?.year ? ` <span class="text-faint">(${m.jellyfin.year})</span>` : ''}</td>
                 <td class="text-muted">${esc(m.library)}</td>
                 <td class="text-xs">${this.themesBadge(m)}</td>
-                <td class="text-xs">${m.jellyfin ? '<span class="text-green-400">Matched</span>' : '<span class="text-faint">Not found</span>'}</td>
+                ${App.settings.jelly_check ? `<td class="text-xs">${m.jellyfin ? '<span class="text-green-400">Matched</span>' : '<span class="text-faint">Not found</span>'}</td>` : ''}
             </tr>`).join('');
         return `
             <div class="p-6">
                 <table class="w-full text-left">
                     <thead class="text-[11px] uppercase tracking-wider text-faint border-b border-line">
-                        <tr>${this.selecting ? '<th></th>' : ''}<th class="py-2 pl-2 font-medium">Title</th><th class="font-medium">Library</th><th class="font-medium">Themes</th><th class="font-medium">Jellyfin</th></tr>
+                        <tr>${this.selecting ? '<th></th>' : ''}<th class="py-2 pl-2 font-medium">Title</th><th class="font-medium">Library</th><th class="font-medium">Themes</th>${App.settings.jelly_check ? '<th class="font-medium">Jellyfin</th>' : ''}</tr>
                     </thead>
                     <tbody class="divide-y divide-line">${rows}</tbody>
                 </table>

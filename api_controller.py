@@ -31,10 +31,19 @@ global_state = {
     "item_statuses": [] 
 }
 
+LOCAL_COVER_NAMES = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
+
+def local_cover(media_folder_path):
+    """Artwork saved in the media folder (the names Jellyfin and other tools use), or None"""
+    for file_name in LOCAL_COVER_NAMES:
+        path = os.path.join(media_folder_path, file_name)
+        if os.path.isfile(path) and os.path.getsize(path) > 1024:
+            return path
+    return None
+
 def process_folder_artwork(media_folder_path, media_folder_name, config, only_file=None):
     print(f"\n[AUTOMATION] 🎬 Starting metadata processing for: {media_folder_name}")
     
-    local_cover_names = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "poster.jpg", "poster.png"]
     final_image_path = None
     temp_image = False 
     
@@ -42,12 +51,9 @@ def process_folder_artwork(media_folder_path, media_folder_name, config, only_fi
     final_album_name = media_folder_name 
     series_id = None
 
-    for file_name in local_cover_names:
-        test_path = os.path.join(media_folder_path, file_name)
-        if os.path.exists(test_path) and os.path.getsize(test_path) > 1024:
-            print(f"[AUTOMATION] 🔍 Priority 2 Triggered: Local image found ({file_name})")
-            final_image_path = test_path
-            break
+    final_image_path = local_cover(media_folder_path)
+    if final_image_path:
+        print(f"[AUTOMATION] 🔍 Priority 2 Triggered: Local image found ({os.path.basename(final_image_path)})")
 
     jelly_url = config.get("jelly_url")
     jelly_api = config.get("jelly_api")
@@ -332,7 +338,7 @@ def _media_entry(media_path):
     except Exception as e:
         print(f"[LIBRARY] Error reading subdirectories of {folder}: {e}")
 
-    return {"media_name": folder, "folder_path": media_path, "tracks": tracks}
+    return {"media_name": folder, "folder_path": media_path, "tracks": tracks, "has_cover": bool(local_cover(media_path))}
 
 # ----------------------------------------------------------------------
 # Download queue workers
@@ -1176,7 +1182,13 @@ class Api:
             if not official_name or official_name == folder_name:
                 official_name = clean_fallback
                 
-            search_query = f"{official_name} official theme song opening"
+            # The year from "Title (1926)" tells apart films with common names
+            year = re.search(r"\((\d{4})\)", folder_name)
+            if year and year.group(1) not in official_name:
+                official_name_for_search = f"{official_name} {year.group(1)}"
+            else:
+                official_name_for_search = official_name
+            search_query = f"{official_name_for_search} official theme song opening"
             
             return {
                 "success": True,
