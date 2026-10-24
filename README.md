@@ -120,6 +120,9 @@ The full guide, including folder layout, permissions and the Jellyfin buttons, i
 
 FFmpeg is bundled. The desktop app listens on `127.0.0.1:5000` only and has no login.
 
+Themarr tells you when a new version is out (Settings > Updates, with the release notes), and the Windows app
+can update itself with one click: it downloads the new version, closes and opens again, keeping your settings.
+
 ### From source
 
 Python 3.13 or newer, FFmpeg (`bin/ffmpeg.exe` on Windows, `ffmpeg` on the PATH elsewhere) and Node.js or Deno,

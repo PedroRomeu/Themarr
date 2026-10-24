@@ -77,6 +77,7 @@ def load_config():
         "jelly_api": "",
         "open_browser": True,
         "library_folders": [],
+        "check_updates": True,
         "audio_fx": {
             "enabled": False,
             "remove_silence": False,

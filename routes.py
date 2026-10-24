@@ -7,6 +7,7 @@ from flask import render_template, jsonify, request, send_file, session, redirec
 from werkzeug.exceptions import HTTPException
 
 from core.config import load_config, SERVER_MODE, MEDIA_ROOT, BACKUP_DIR, APP_VERSION
+from core import updates
 from core.safety import UnsafeMediaOperation, check_media_read, check_theme_write, is_theme_file
 from api_controller import save_uploaded_backup, local_cover
 
@@ -125,6 +126,19 @@ def register_routes(app, api_system):
     def jellyfin_buttons_script():
         # The script ready to paste into JavaScript Injector by hand
         return api_system.jellyfin_buttons_script(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+    # ---------------- Updates ----------------
+    @app.route('/api/updates', methods=['GET'])
+    def api_updates():
+        return jsonify(updates.check_for_update(force=request.args.get('force') == '1'))
+
+    @app.route('/api/updates/install', methods=['POST'])
+    def api_updates_install():
+        return jsonify(updates.install_update())
+
+    @app.route('/api/updates/status', methods=['GET'])
+    def api_updates_status():
+        return jsonify(updates.install_state)
 
     # ---------------- Library ----------------
     @app.route('/api/library', methods=['GET'])

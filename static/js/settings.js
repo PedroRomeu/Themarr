@@ -75,6 +75,14 @@ App.pages.settings = {
                     </div>
                 </section>
 
+                <section id="updates" class="card">
+                    <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                        <div><h2 class="font-medium">Updates</h2><p class="text-xs text-faint mt-0.5">Themarr asks GitHub for new versions when it opens and every 6 hours.</p></div>
+                        <label class="ml-auto flex items-center gap-2 text-xs text-muted"><input id="setCheckUpdates" type="checkbox" class="w-4 h-4" ${s.check_updates !== false ? 'checked' : ''}>Check automatically</label>
+                    </div>
+                    <div id="setUpdateBody" class="p-5 text-muted">Checking for updates...</div>
+                </section>
+
                 ${server ? `
                 <section class="card px-5 py-4 flex items-center gap-3">
                     <div><h2 class="font-medium">Account</h2><p class="text-xs text-faint mt-0.5">Signed in as <span class="text-ink">${esc(App.info.user)}</span>, a Jellyfin administrator.</p></div>
@@ -90,6 +98,104 @@ App.pages.settings = {
 
         this.bind(view, folders);
         refreshIcons();
+        this.drawUpdates(App.update || await App.checkUpdates(true));
+    },
+
+    drawUpdates(info) {
+        const body = document.getElementById('setUpdateBody');
+        if (!body) return;
+        const check = `<button id="setCheckNow" class="btn">${icon('refresh-cw')}Check now</button>`;
+
+        if (!info?.success) {
+            body.innerHTML = `<div class="flex flex-wrap items-center gap-3"><span>Could not check for updates${info?.message ? `: ${esc(info.message)}` : '.'}</span>${check}</div>`;
+        } else if (!info.newer) {
+            body.innerHTML = `<div class="flex flex-wrap items-center gap-3">
+                <span class="flex items-center gap-2 text-green-400">${icon('circle-check')}You have the latest version (${esc(info.current)}).</span>
+                ${check}<a href="${esc(info.url)}" target="_blank" class="btn btn-ghost">${icon('external-link')}Release notes</a></div>`;
+        } else {
+            const size = info.asset_size ? ` (${Math.round(info.asset_size / 1048576)} MB)` : '';
+            let action;
+            if (info.can_self_update) {
+                action = `<button id="setInstall" class="btn btn-primary">${icon('download')}Update now${size}</button>`;
+            } else if (App.info.server_mode) {
+                action = `<div class="w-full text-xs space-y-2">
+                    <p>Update the container on the server, in the folder where you installed Themarr:</p>
+                    <pre class="log-view bg-page border border-line rounded-md px-3 py-2 text-ink select-text whitespace-pre-wrap">git pull
+docker compose up -d --build</pre>
+                    <p class="text-faint">Then reload this page. If the release notes say the Jellyfin buttons changed, click Install again under Jellyfin.</p></div>`;
+            } else {
+                action = `<p class="w-full text-xs">This copy runs from the source code: update it with <code class="bg-raised px-1 rounded">git pull</code>, or download the new zip.</p>`;
+            }
+            body.innerHTML = `
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="flex items-center gap-2 text-accent-text">${icon('circle-arrow-up')}Version ${esc(info.latest)} is available. You have ${esc(info.current)}.</span>
+                    <a href="${esc(info.url)}" target="_blank" class="btn btn-ghost">${icon('external-link')}Release page</a>
+                    ${check}
+                    ${action}
+                </div>
+                <div id="setInstallProgress"></div>
+                <details class="mt-4" open>
+                    <summary class="cursor-pointer select-none text-xs hover:text-ink">What's new in ${esc(info.name)}</summary>
+                    <div class="mt-2 text-[13px] leading-relaxed max-h-80 overflow-y-auto scroll pr-2">${renderNotes(info.notes)}</div>
+                </details>`;
+        }
+        refreshIcons();
+        body.querySelector('#setCheckNow')?.addEventListener('click', async () => {
+            body.querySelector('#setCheckNow').disabled = true;
+            this.drawUpdates(await App.checkUpdates(true));
+        });
+        body.querySelector('#setInstall')?.addEventListener('click', () => this.installUpdate(info));
+    },
+
+    async installUpdate(info) {
+        const ok = await confirmDialog({
+            title: `Update to ${info.latest}`,
+            message: 'Themarr downloads the new version, closes and opens again on its own in a few seconds. Your settings, themes and backups are kept. Wait for the queue to finish first if it is running.',
+            confirmLabel: 'Update now',
+        });
+        if (!ok) return;
+        const result = await api('/api/updates/install', {});
+        if (!result.success) return toast(result.message, 'error');
+
+        const box = document.getElementById('setInstallProgress');
+        const button = document.getElementById('setInstall');
+        if (button) button.disabled = true;
+        const show = (text, percent) => {
+            if (!box) return;
+            box.innerHTML = `<div class="mt-4 flex items-center gap-3 text-xs">
+                <span class="text-accent-text">${icon('loader-circle', 'animate-spin')}</span><span class="flex-1">${esc(text)}</span>
+                ${percent != null ? `<div class="w-48 h-1.5 bg-raised rounded-full overflow-hidden"><div class="h-full bg-accent" style="width:${percent}%"></div></div>` : ''}</div>`;
+            refreshIcons();
+        };
+
+        const follow = async () => {
+            const state = await api('/api/updates/status').catch(() => ({ stage: 'restarting' }));
+            if (state.stage === 'downloading') {
+                const mb = n => (n / 1048576).toFixed(0);
+                show(`Downloading ${mb(state.downloaded)} of ${mb(state.total)} MB...`, state.total ? Math.round(state.downloaded / state.total * 100) : null);
+            } else if (state.stage === 'preparing') {
+                show('Unpacking the new version...');
+            } else if (state.stage === 'error') {
+                if (box) box.innerHTML = '';
+                if (button) button.disabled = false;
+                return toast(`Update failed: ${state.message}`, 'error');
+            } else if (state.stage === 'restarting') {
+                show('Themarr is restarting with the new version. This page reloads by itself.');
+                return this.waitForNewVersion(info.latest);
+            }
+            setTimeout(follow, 700);
+        };
+        follow();
+    },
+
+    // The tray app keeps this page open: reload it once the new version answers
+    async waitForNewVersion(version) {
+        for (let i = 0; i < 120; i++) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const info = await api('/api/app_info').catch(() => null);
+            if (info?.version === version) return location.reload();
+        }
+        toast('Themarr did not come back. Open it again from the Start menu or its folder.', 'error');
     },
 
     bind(view, folders) {
@@ -129,6 +235,11 @@ App.pages.settings = {
             const result = await api('/api/jellyfin/install_buttons', {});
             out.className = `text-xs ${result.success ? 'text-green-400' : 'text-red-400'}`;
             out.textContent = result.message;
+        };
+
+        $('setCheckUpdates').onchange = async event => {
+            await App.saveSettings({ check_updates: event.target.checked });
+            if (event.target.checked) App.checkUpdates(true);
         };
 
         const openBrowser = $('setOpenBrowser');

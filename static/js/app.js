@@ -469,6 +469,43 @@ App.refresh = async function () {
     }
 };
 
+// Update check against the latest GitHub release (Settings > Updates can turn it off)
+App.checkUpdates = async function (force = false) {
+    if (!force && App.settings.check_updates === false) return null;
+    const result = await api(force ? '/api/updates?force=1' : '/api/updates').catch(() => null);
+    if (result?.success) App.update = result;
+    const label = document.getElementById('appVersion');
+    label.innerHTML = App.update?.newer
+        ? `<a href="#/settings" class="flex items-center gap-1.5 text-accent-text hover:underline" title="Version ${esc(App.update.latest)} is available">${icon('circle-arrow-up', 'icon-sm')}Update available</a><span class="block mt-0.5">v${esc(App.info.version)}</span>`
+        : `v${esc(App.info.version)}`;
+    refreshIcons();
+    return result;
+};
+
+// The few Markdown bits GitHub release notes use: headings, bullets, bold, code and links
+function renderNotes(markdown) {
+    const inline = text => esc(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-ink">$1</strong>')
+        .replace(/`([^`]+)`/g, '<code class="text-[11px] bg-raised px-1 rounded">$1</code>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" class="text-accent-text hover:underline">$1</a>');
+    let html = '';
+    let inList = false;
+    for (const raw of String(markdown || '').split(/\r?\n/)) {
+        const line = raw.trim();
+        const bullet = line.match(/^[*-]\s+(.*)/);
+        if (inList && !bullet) { html += '</ul>'; inList = false; }
+        if (bullet) {
+            if (!inList) { html += '<ul class="list-disc pl-5 space-y-1">'; inList = true; }
+            html += `<li>${inline(bullet[1])}</li>`;
+        } else if (/^#{1,3}\s/.test(line)) {
+            html += `<h4 class="font-medium text-ink mt-3 mb-1">${inline(line.replace(/^#+\s*/, ''))}</h4>`;
+        } else if (line) {
+            html += `<p class="my-1.5">${inline(line)}</p>`;
+        }
+    }
+    return html + (inList ? '</ul>' : '');
+}
+
 // Queue items of one media folder that are not done yet (shown on its page)
 App.pendingFor = function (folder) {
     return App.queue.items.filter(i => i.media_folder === folder && i.status !== 'completed');
@@ -512,4 +549,6 @@ App.start = async function () {
     if (!location.hash) location.hash = '#/library';
     App.render();
     App.poll();
+    App.checkUpdates();
+    setInterval(() => App.checkUpdates(), 6 * 3600 * 1000);
 };

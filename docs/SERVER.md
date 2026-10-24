@@ -162,6 +162,8 @@ path inside Themarr. Then `docker compose up -d`.
 
 ## Updating
 
+Settings > Updates shows when a new version is out, with its release notes. A container does not replace itself, so update it from the server:
+
 ```bash
 cd ~/themarr
 git pull
