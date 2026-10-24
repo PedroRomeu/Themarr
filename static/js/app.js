@@ -36,6 +36,14 @@ function fmtTime(seconds) {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+// 65.43 -> "1:05.4", for trim points
+function fmtTimePrecise(seconds) {
+    if (seconds == null || isNaN(seconds)) return '0:00.0';
+    seconds = Math.max(0, Math.round(seconds * 10) / 10);
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, '0')}`;
+}
+
 // "75", "1:15" or "0:01:15" -> 75. Empty or invalid -> null
 function parseTime(text) {
     text = String(text ?? '').trim();
@@ -197,6 +205,7 @@ const Player = {
             return;
         }
         this.key = key;
+        this.pendingSeek = null;
         this.el.src = url;
         if (startAt != null) this.el.addEventListener('loadedmetadata', () => { this.el.currentTime = startAt; }, { once: true });
         this.el.play().catch(() => {});
@@ -207,7 +216,35 @@ const Player = {
         if (this.el.src) this.el.currentTime = Math.max(0, seconds);
     },
 
+    // Moves `key` to `seconds` without starting it, loading it first when another audio is loaded
+    seekTo(key, url, seconds) {
+        seconds = Math.max(0, seconds);
+        if (this.key !== key || !this.el.src) {
+            this.key = key;
+            this.el.src = url;
+            this.el.load();
+        }
+        // Before the metadata arrives the browser ignores currentTime: keep the last position asked for
+        if (this.el.readyState < 1) {
+            this.pendingSeek = seconds;
+            this.el.addEventListener('loadedmetadata', () => {
+                if (this.pendingSeek != null) this.el.currentTime = this.pendingSeek;
+                this.pendingSeek = null;
+                this.notify();
+            }, { once: true });
+        } else {
+            this.el.currentTime = seconds;
+        }
+        this.notify();
+    },
+
+    position(key) {
+        if (this.key !== key) return 0;
+        return this.pendingSeek ?? this.el.currentTime;
+    },
+
     stop() {
+        this.pendingSeek = null;
         this.el.pause();
         this.el.removeAttribute('src');
         this.el.load();
@@ -221,6 +258,65 @@ const Player = {
 
     notify() {
         this.listeners.forEach(listener => listener(this));
+    },
+};
+
+// ---------------------------------------------------------------------------
+// Timeline: the seek bar used to trim (Add Theme preview and the trim editor of a track).
+// Click or drag to move, hover shows the time under the mouse, arrow keys move 1 s.
+// ---------------------------------------------------------------------------
+const Timeline = {
+    html() {
+        return `<div class="timeline" data-timeline tabindex="0" title="Click or drag to move. Arrow keys: 1 second">
+            <div class="rail"></div><div class="trim-region" style="left:0;right:0"></div>
+            <div class="playhead" style="left:0"></div><div class="hover-time hidden"></div></div>`;
+    },
+
+    // options: duration() -> seconds, current() -> seconds, seek(seconds)
+    bind(el, options) {
+        const timeAt = clientX => {
+            const rect = el.getBoundingClientRect();
+            const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+            return ratio * (options.duration() || 0);
+        };
+        const tip = el.querySelector('.hover-time');
+        const showTip = event => {
+            if (!options.duration()) return;
+            const rect = el.getBoundingClientRect();
+            tip.textContent = fmtTimePrecise(timeAt(event.clientX));
+            tip.style.left = `${Math.min(rect.width - 24, Math.max(24, event.clientX - rect.left))}px`;
+            tip.classList.remove('hidden');
+        };
+        let dragging = false;
+        el.addEventListener('pointerdown', event => {
+            if (!options.duration()) return;
+            dragging = true;
+            el.setPointerCapture(event.pointerId);
+            options.seek(timeAt(event.clientX));
+            showTip(event);
+        });
+        el.addEventListener('pointermove', event => {
+            showTip(event);
+            if (dragging) options.seek(timeAt(event.clientX));
+        });
+        el.addEventListener('pointerup', () => { dragging = false; });
+        el.addEventListener('pointerleave', () => { if (!dragging) tip.classList.add('hidden'); });
+        el.addEventListener('keydown', event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' || !options.duration()) return;
+            event.preventDefault();
+            const step = event.key === 'ArrowLeft' ? -1 : 1;
+            options.seek(Math.min(options.duration(), Math.max(0, options.current() + step)));
+        });
+    },
+
+    draw(el, { duration, current, start, end }) {
+        if (!el || !duration) return;
+        const from = Math.min(start ?? 0, duration);
+        const to = Math.max(from, Math.min(end ?? duration, duration));
+        const region = el.querySelector('.trim-region');
+        region.style.left = `${(from / duration) * 100}%`;
+        region.style.right = `${100 - (to / duration) * 100}%`;
+        el.querySelector('.playhead').style.left = `${(Math.min(current, duration) / duration) * 100}%`;
     },
 };
 

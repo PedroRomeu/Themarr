@@ -131,14 +131,14 @@ App.pages.addTheme = {
         panel.innerHTML = `
             <div class="flex items-center gap-3">
                 <button id="atPlay" class="w-9 h-9 rounded-full bg-accent hover:bg-accent-hover text-white grid place-items-center flex-shrink-0" title="Play or pause">${icon('loader-circle', 'animate-spin')}</button>
-                <div class="flex-1 min-w-0">
-                    <div id="atTimeline" class="timeline"><div class="rail"></div><div id="atRegion" class="trim-region" style="left:0;right:0"></div><div id="atHead" class="playhead" style="left:0"></div></div>
+                <div class="flex-1 min-w-0 pt-5">
+                    <div id="atTimeline">${Timeline.html()}</div>
                     <div class="flex justify-between items-center text-[11px] text-faint mt-1.5 gap-2">
-                        <span class="flex items-center gap-1">Start <input id="atStart" class="field py-0.5 px-1.5 w-14 font-mono text-[11px]" placeholder="0:00">
-                            <button id="atMarkStart" class="icon-btn p-1" title="Start here (current position)">${icon('map-pin', 'icon-sm')}</button></span>
-                        <span id="atClock" class="font-mono">0:00 / 0:00</span>
-                        <span class="flex items-center gap-1"><button id="atMarkEnd" class="icon-btn p-1" title="End here (current position)">${icon('map-pin', 'icon-sm')}</button>
-                            <input id="atEnd" class="field py-0.5 px-1.5 w-14 font-mono text-[11px]" placeholder="end"> End</span>
+                        <span class="flex items-center gap-1">Start <input id="atStart" class="field py-0.5 px-1.5 w-16 font-mono text-[11px]" placeholder="0:00.0">
+                            <button id="atMarkStart" class="icon-btn p-1" title="Start at the white line">${icon('map-pin', 'icon-sm')}</button></span>
+                        <span id="atClock" class="font-mono">0:00.0 / 0:00.0</span>
+                        <span class="flex items-center gap-1"><button id="atMarkEnd" class="icon-btn p-1" title="End at the white line">${icon('map-pin', 'icon-sm')}</button>
+                            <input id="atEnd" class="field py-0.5 px-1.5 w-16 font-mono text-[11px]" placeholder="end"> End</span>
                     </div>
                 </div>
             </div>
@@ -167,12 +167,11 @@ App.pages.addTheme = {
         ['#atStart', '#atEnd'].forEach(id => panel.querySelector(id).oninput = () => this.drawTimeline());
         panel.querySelector('#atMarkStart').onclick = () => this.mark('atStart');
         panel.querySelector('#atMarkEnd').onclick = () => this.mark('atEnd');
-        panel.querySelector('#atTimeline').onclick = event => {
-            const duration = this.duration();
-            if (!duration || Player.key !== 'preview') return;
-            const rect = event.currentTarget.getBoundingClientRect();
-            Player.seek(((event.clientX - rect.left) / rect.width) * duration);
-        };
+        Timeline.bind(panel.querySelector('[data-timeline]'), {
+            duration: () => this.duration(),
+            current: () => Player.position('preview'),
+            seek: seconds => this.stream && Player.seekTo('preview', this.stream.url, seconds),
+        });
         panel.querySelector('#atPlay').onclick = () => {
             if (!this.stream) return;
             const start = parseTime(document.getElementById('atStart').value);
@@ -199,22 +198,22 @@ App.pages.addTheme = {
     },
 
     mark(inputId) {
-        if (Player.key !== 'preview') return toast('Play the preview first, then mark the position.', 'info');
-        document.getElementById(inputId).value = fmtTime(Player.el.currentTime);
+        if (Player.key !== 'preview') return toast('Play the preview or click on the bar first, then mark the position.', 'info');
+        document.getElementById(inputId).value = fmtTimePrecise(Player.position('preview'));
         this.drawTimeline();
     },
 
     drawTimeline() {
+        const timeline = document.querySelector('#atTimeline [data-timeline]');
         const duration = this.duration();
-        const region = document.getElementById('atRegion');
-        if (!region || !duration) return;
-        const start = Math.min(parseTime(document.getElementById('atStart').value) ?? 0, duration);
-        const end = Math.min(parseTime(document.getElementById('atEnd').value) ?? duration, duration);
-        region.style.left = `${(start / duration) * 100}%`;
-        region.style.right = `${100 - (Math.max(end, start) / duration) * 100}%`;
-        const current = Player.key === 'preview' ? Player.el.currentTime : 0;
-        document.getElementById('atHead').style.left = `${(current / duration) * 100}%`;
-        document.getElementById('atClock').textContent = `${fmtTime(current)} / ${fmtTime(duration)}`;
+        if (!timeline || !duration) return;
+        const current = Player.position('preview');
+        Timeline.draw(timeline, {
+            duration, current,
+            start: parseTime(document.getElementById('atStart').value),
+            end: parseTime(document.getElementById('atEnd').value),
+        });
+        document.getElementById('atClock').textContent = `${fmtTimePrecise(current)} / ${fmtTimePrecise(duration)}`;
     },
 
     syncPlayer() {

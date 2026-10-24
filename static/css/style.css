@@ -58,8 +58,10 @@ select { background-image: none; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .trim-region { position: absolute; top: 0; bottom: 0; background: rgba(139,92,246,.18); border-left: 2px solid #8b5cf6; border-right: 2px solid #8b5cf6; }
-.timeline { position: relative; height: 36px; background: #141418; border: 1px solid #2e2e38; border-radius: 6px; overflow: hidden; cursor: pointer; }
+.timeline { position: relative; height: 36px; background: #141418; border: 1px solid #2e2e38; border-radius: 6px; cursor: pointer; touch-action: none; outline: none; }
+.timeline:focus-visible { border-color: #8b5cf6; }
 .timeline .rail { position: absolute; left: 0; right: 0; top: 50%; height: 4px; transform: translateY(-50%); background: #26262f; }
-.timeline .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
+.timeline .playhead { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #fff; border-radius: 1px; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+.timeline .hover-time { position: absolute; top: -24px; transform: translateX(-50%); background: #26262f; border: 1px solid #2e2e38; color: #e7e7ec; font: 11px ui-monospace, Consolas, monospace; padding: 1px 6px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
 
 .log-view { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }

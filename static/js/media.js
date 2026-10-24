@@ -133,16 +133,20 @@ App.pages.media = {
     },
 
     trimEditor(track) {
+        const { start = '', end = '' } = this.editing || {};
         return `
             <div data-trim-editor class="px-4 pb-4 pt-1">
                 <div class="bg-page/60 border border-line rounded-md p-3 space-y-3">
-                    <p class="text-xs text-muted">Play the track, then mark where the theme should start and end. Saving re-encodes the file with your audio settings.</p>
+                    <div class="flex items-center gap-3 pt-5">
+                        <div class="flex-1">${Timeline.html()}</div>
+                        <span data-trim-clock class="font-mono text-xs text-muted whitespace-nowrap">0:00.0 / ${fmtTimePrecise(track.duration)}</span>
+                    </div>
                     <div class="flex flex-wrap items-end gap-3">
                         <label class="text-xs text-muted space-y-1"><span class="block">Start</span>
-                            <span class="flex gap-1"><input data-trim-start class="field py-1 w-20 font-mono" placeholder="0:00"><button data-mark="start" class="btn" title="Use the current position">${icon('map-pin', 'icon-sm')}</button></span></label>
+                            <span class="flex gap-1"><input data-trim-start class="field py-1 w-24 font-mono" placeholder="0:00.0" value="${esc(start)}"><button data-mark="start" class="btn" title="Start at the white line">${icon('map-pin', 'icon-sm')}</button></span></label>
                         <label class="text-xs text-muted space-y-1"><span class="block">End</span>
-                            <span class="flex gap-1"><input data-trim-end class="field py-1 w-20 font-mono" placeholder="${fmtTime(track.duration)}"><button data-mark="end" class="btn" title="Use the current position">${icon('map-pin', 'icon-sm')}</button></span></label>
-                        <span class="text-xs text-faint pb-2">Leave empty to keep the original start or end.</span>
+                            <span class="flex gap-1"><input data-trim-end class="field py-1 w-24 font-mono" placeholder="${fmtTimePrecise(track.duration)}" value="${esc(end)}"><button data-mark="end" class="btn" title="End at the white line">${icon('map-pin', 'icon-sm')}</button></span></label>
+                        <span class="text-xs text-faint pb-2 max-w-xs">Drag the bar to find the spot, then mark it. Empty keeps the original start or end.</span>
                         <div class="ml-auto flex gap-2">
                             <button data-edit-cancel class="btn btn-ghost">Cancel</button>
                             <button data-trim-save class="btn btn-primary py-1.5 text-xs">${icon('scissors', 'icon-sm')}Save trim</button>
@@ -202,9 +206,22 @@ App.pages.media = {
 
         const editor = row.querySelector('[data-trim-editor]');
         if (editor) {
+            const duration = () => (Player.key === key && Player.el.duration) || track.duration;
+            Timeline.bind(editor.querySelector('[data-timeline]'), {
+                duration,
+                current: () => Player.position(key),
+                seek: seconds => Player.seekTo(key, streamUrl, seconds),
+            });
+            ['start', 'end'].forEach(which => editor.querySelector(`[data-trim-${which}]`).oninput = event => {
+                this.editing[which] = event.target.value;
+                this.syncPlayers();
+            });
             editor.querySelectorAll('[data-mark]').forEach(button => button.onclick = () => {
-                if (Player.key !== key) return toast('Play the track first, then mark the position.', 'info');
-                editor.querySelector(`[data-trim-${button.dataset.mark}]`).value = fmtTime(Player.el.currentTime);
+                if (Player.key !== key) return toast('Play the track or click on the bar first, then mark the position.', 'info');
+                const value = fmtTimePrecise(Player.position(key));
+                editor.querySelector(`[data-trim-${button.dataset.mark}]`).value = value;
+                this.editing[button.dataset.mark] = value;
+                this.syncPlayers();
             });
             editor.querySelector('[data-trim-save]').onclick = () => {
                 const start = editor.querySelector('[data-trim-start]').value.trim();
@@ -218,7 +235,7 @@ App.pages.media = {
     },
 
     setEditing(path, mode) {
-        this.editing = path ? { path, mode } : null;
+        this.editing = path ? { path, mode, start: '', end: '' } : null;
         this.draw();
     },
 
@@ -236,8 +253,24 @@ App.pages.media = {
             }
             const progress = row.querySelector('[data-progress]');
             const active = Player.key === key;
-            progress.classList.toggle('hidden', !active);
+            const editor = row.querySelector('[data-trim-editor]');
+            progress.classList.toggle('hidden', !active || !!editor);
             if (active && Player.el.duration) progress.firstElementChild.style.width = `${(Player.el.currentTime / Player.el.duration) * 100}%`;
+
+            if (editor) {
+                const track = this.media.tracks.find(t => t.file_path === row.dataset.track);
+                const duration = (active && Player.el.duration) || track.duration;
+                const current = Player.position(key);
+                Timeline.draw(editor.querySelector('[data-timeline]'), {
+                    duration, current,
+                    start: parseTime(editor.querySelector('[data-trim-start]').value),
+                    end: parseTime(editor.querySelector('[data-trim-end]').value),
+                });
+                editor.querySelector('[data-trim-clock]').textContent = `${fmtTimePrecise(current)} / ${fmtTimePrecise(duration)}`;
+                // Stop at the chosen end, like the trimmed file will
+                const end = parseTime(editor.querySelector('[data-trim-end]').value);
+                if (Player.isPlaying(key) && end != null && current >= end) Player.el.pause();
+            }
         });
     },
 
