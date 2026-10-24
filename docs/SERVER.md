@@ -29,11 +29,10 @@ Themarr expects one host folder holding your libraries, one subfolder per librar
 
 ```
 /srv/media            <- MEDIA_PATH, seen by Themarr as /data
-├── Animes/
-│   └── Frieren/
+├── TV/
+│   └── Lost/
 │       ├── Season 1/
 │       └── theme.mp3        <- what Themarr writes
-├── TV/
 └── Movies/
     └── Up (2009)/
 ```
@@ -73,7 +72,7 @@ Open `.env` and set at least `MEDIA_PATH` and `JELLYFIN_API_KEY`. The values you
 | Setting | How to find it |
 | --- | --- |
 | `MEDIA_PATH` | The host folder above your libraries (the left side of Jellyfin's media volume, if it runs in Docker). |
-| `PUID`, `PGID` | Owner of the media files: `stat -c '%u %g' /srv/media/Animes`. Themes are created as this user. |
+| `PUID`, `PGID` | Owner of the media files: `stat -c '%u %g' /srv/media/TV`. Themes are created as this user. |
 | `JELLYFIN_NETWORK` | `docker inspect jellyfin --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'` |
 | `JELLYFIN_URL` | `http://<jellyfin container name>:8096` on the same Docker network. |
 | `THEMARR_BIND` | `127.0.0.1` to reach Themarr only through a VPN or proxy, or the server's LAN IP for the home network. |
@@ -144,7 +143,7 @@ Set `THEMARR_PUBLIC_URL` and click Install again if Themarr lives elsewhere (rev
 
 The button sends Themarr a Jellyfin item, and Themarr needs to find that item's folder on its own disk.
 It works out on its own when both containers see the same folders, even at different mount points:
-`/media/Animes/Frieren` in Jellyfin finds `/data/Animes/Frieren` in Themarr, and `/tvshows/Dark` finds
+`/media/Shows/Lost` in Jellyfin finds `/data/TV/Lost` in Themarr, and `/tvshows/Dark` finds
 `/data/TV/Dark` if only one library has a `Dark` folder.
 
 If Themarr still says `Folder not visible from Themarr: <path>`, tell it where each Jellyfin folder is:

@@ -25,7 +25,7 @@ Jellyfin's own pages that opens the current series or movie in Themarr.
 > [!NOTE]
 > Looking for fully automatic themes from a shared database? See
 > [Themerr](https://github.com/LizardByte/Themerr). Themarr is the hands-on alternative: you choose each track,
-> which suits anime, multiple openings and seasons with their own theme.
+> which suits media with several openings or a different theme per season.
 
 ## Features
 
@@ -67,7 +67,7 @@ Jellyfin's own pages that opens the current series or movie in Themarr.
 Only theme files, in the layout Jellyfin reads:
 
 ```
-Frieren/
+Lost/
 ├── theme.mp3                     <- one main theme
 ├── theme-music/                  <- or several main themes
 │   ├── Opening 1.mp3

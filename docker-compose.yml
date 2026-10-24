@@ -20,7 +20,7 @@ services:
       - THEMARR_PATH_MAP=${THEMARR_PATH_MAP:-}
     volumes:
       - ./config:/config
-      # Every library goes UNDER /data, one folder per library (/data/Animes, /data/TV, ...): Themarr only
+      # Every library goes UNDER /data, one folder per library (/data/TV, /data/Movies, ...): Themarr only
       # writes themes at /data/<library>/<media>. Start read-only (ro) and switch MEDIA_ACCESS to rw once verified.
       # More libraries on other disks: add lines in docker-compose.override.yml (see docs/SERVER.md).
       - ${MEDIA_PATH:?set MEDIA_PATH in .env}:/data:${MEDIA_ACCESS:-ro}
